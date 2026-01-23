@@ -5,6 +5,7 @@ Build a local tickets folder from ServiceNow incident exports.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import json
@@ -12,9 +13,7 @@ import os
 import re
 import shutil
 import sys
-import threading
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
@@ -469,25 +468,24 @@ def extract_attachments(data: Dict[str, Any], dest_dir: str) -> List[Dict[str, A
     return resolved
 
 
-def ensure_output_root() -> Optional[threading.Thread]:
-    cleanup_thread: Optional[threading.Thread] = None
+def ensure_output_root() -> Optional[asyncio.Task[None]]:
+    cleanup_task: Optional[asyncio.Task[None]] = None
     if os.path.isdir(OUTPUT_ROOT):
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         old_path = f"{OUTPUT_ROOT}.old-{timestamp}-{os.getpid()}"
         os.rename(OUTPUT_ROOT, old_path)
 
-        def cleanup() -> None:
+        async def cleanup() -> None:
             try:
-                shutil.rmtree(old_path)
+                await asyncio.to_thread(shutil.rmtree, old_path)
             except Exception as exc:
                 sys.stderr.write(
                     f"Failed to delete old output folder {old_path}: {exc}\n"
                 )
 
-        cleanup_thread = threading.Thread(target=cleanup)
-        cleanup_thread.start()
+        cleanup_task = asyncio.create_task(cleanup())
     os.makedirs(OUTPUT_ROOT, exist_ok=True)
-    return cleanup_thread
+    return cleanup_task
 
 
 def write_agents_md() -> None:
@@ -572,12 +570,12 @@ def render_progress(done: int, total: int) -> None:
     sys.stderr.flush()
 
 
-def main() -> None:
+async def main_async() -> None:
     if not os.path.isdir(SOURCE_ROOT):
         raise FileNotFoundError(f"Source root not found: {SOURCE_ROOT}")
-    cleanup_thread = ensure_output_root()
+    cleanup_task = ensure_output_root()
 
-    paths = list(iter_json_files(SOURCE_ROOT))
+    paths = await asyncio.to_thread(lambda: list(iter_json_files(SOURCE_ROOT)))
     total = len(paths)
     if total == 0:
         raise ValueError(f"No JSON files found under {SOURCE_ROOT}")
@@ -586,19 +584,25 @@ def main() -> None:
 
     max_workers = min(32, (os.cpu_count() or 4) * 2)
     done = 0
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(process_ticket_file, path) for path in paths]
-        for future in as_completed(futures):
-            future.result()
-            done += 1
-            if done == total or done % 50 == 0:
-                render_progress(done, total)
+    semaphore = asyncio.Semaphore(max_workers)
+
+    async def process_with_limit(path: str) -> None:
+        async with semaphore:
+            await asyncio.to_thread(process_ticket_file, path)
+
+    tasks = [asyncio.create_task(process_with_limit(path)) for path in paths]
+    for task in asyncio.as_completed(tasks):
+        await task
+        done += 1
+        if done == total or done % 50 == 0:
+            render_progress(done, total)
 
     sys.stderr.write("\n")
     write_agents_md()
-    if cleanup_thread is not None:
-        cleanup_thread.join()
+    if cleanup_task is not None:
+        sys.stderr.write("Waiting on old tickets deletion...\n")
+        await cleanup_task
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main_async())
