@@ -144,6 +144,26 @@ def clean_message_text(text: str) -> str:
         pattern = r"^[A-Za-z][A-Za-z.'-]*(\s+[A-Za-z][A-Za-z.'-]*){0,3}$"
         return re.match(pattern, stripped) is not None
 
+    def is_footer_line(line: str) -> bool:
+        stripped = line.strip()
+        if not stripped:
+            return False
+        content = re.sub(r"^>+\s*", "", stripped)
+        content = content.strip()
+        lower = content.lower()
+        footer_patterns = [
+            r"^nersc account and allocation support\.?$",
+            r"^nersc account & allocations support\.?$",
+            r"^nersc consulting\.?$",
+            r"^nersc account support:?\s*$",
+            r"^nersc account support:\s*accounts@nersc\.gov\.?$",
+            r"^accounts@nersc\.gov\.?$",
+        ]
+        for pattern in footer_patterns:
+            if re.match(pattern, lower):
+                return True
+        return False
+
     # Only remove metadata if it appears as the first non-empty lines.
     def strip_leading_metadata() -> None:
         while True:
@@ -217,12 +237,20 @@ def clean_message_text(text: str) -> str:
                 for idx in range(last_non_empty, signoff_idx - 1, -1):
                     filtered.pop(idx)
 
+    filtered = [line for line in filtered if not is_footer_line(line)]
+
     while filtered and filtered[0].strip() == "":
         filtered.pop(0)
     while filtered and filtered[-1].strip() == "":
         filtered.pop()
 
     return "\n".join(filtered)
+
+
+def is_iris_pi_request(short_description: Optional[str]) -> bool:
+    if not short_description:
+        return False
+    return short_description.strip().lower() == "ticket from iris: new pi account request"
 
 
 def normalize_author(name: str, internal: bool) -> str:
@@ -523,11 +551,26 @@ def process_ticket_file(path: str) -> None:
     metadata = data.get("metadata") or {}
     incident_fields = data.get("incident_fields") or {}
 
+    short_description = incident_fields.get("short_description")
+    if is_iris_pi_request(short_description):
+        return
+
+    attachments_raw = data.get("attachments") or []
+    if not isinstance(attachments_raw, list):
+        raise ValueError("Attachments must be a list")
+
+    messages = extract_messages(data)
+    if (
+        len(messages) == 1
+        and not messages[0].get("internal", False)
+        and not attachments_raw
+    ):
+        return
+
     incident_number = require_value(
         metadata.get("incident_number") or incident_fields.get("number"),
         "incident number",
     )
-    short_description = incident_fields.get("short_description")
     status = require_value(incident_fields.get("state"), "status")
 
     opened_raw = require_value(
@@ -548,7 +591,6 @@ def process_ticket_file(path: str) -> None:
     ticket_dir = os.path.join(OUTPUT_ROOT, year, month, incident_number)
     os.makedirs(ticket_dir, exist_ok=True)
 
-    messages = extract_messages(data)
     attachments = extract_attachments(data, ticket_dir)
     timeline = build_timeline(messages, attachments)
 
