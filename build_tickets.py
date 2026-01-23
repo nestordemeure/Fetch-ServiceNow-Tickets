@@ -1,0 +1,380 @@
+#!/usr/bin/env python3
+"""
+Build a local tickets folder from ServiceNow incident exports.
+"""
+
+from __future__ import annotations
+
+import base64
+import binascii
+import json
+import os
+import re
+import shutil
+from datetime import datetime
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+
+SOURCE_ROOT = "/global/cfs/cdirs/nstaff/dingpf/servicenow_incidents"
+OUTPUT_ROOT = os.path.abspath(os.path.join(os.getcwd(), "tickets"))
+
+ATTACHMENT_TIMESTAMP_KEYS = [
+    "timestamp",
+    "sys_created_on",
+    "created_on",
+    "created_at",
+    "created",
+]
+
+ATTACHMENT_NAME_KEYS = [
+    "file_name",
+    "filename",
+    "name",
+]
+
+ATTACHMENT_CONTENT_KEYS = [
+    "content_base64",
+    "payload_base64",
+    "file_bytes",
+    "content",
+    "data",
+    "body",
+]
+
+MESSAGE_TIMESTAMP_KEYS = [
+    "timestamp",
+    "sys_created_on",
+    "created_on",
+    "created_at",
+    "created",
+]
+
+
+def date_only(value: str) -> str:
+    if " " in value:
+        return value.split(" ", 1)[0]
+    if "T" in value:
+        return value.split("T", 1)[0]
+    return value
+
+
+def parse_timestamp(value: str) -> datetime:
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(value.replace("Z", ""))
+    except ValueError:
+        raise ValueError(f"Unparseable timestamp: {value}") from None
+
+
+def pick_first_key(data: Dict[str, Any], keys: Iterable[str]) -> Optional[str]:
+    for key in keys:
+        value = data.get(key)
+        if value:
+            return value
+    return None
+
+
+def require_value(value: Optional[str], context: str) -> str:
+    if value is None or value == "":
+        raise ValueError(f"Missing required value: {context}")
+    return value
+
+
+def sanitize_filename(name: str) -> str:
+    name = name.replace("/", "_").replace("\\", "_")
+    name = re.sub(r"[^A-Za-z0-9._ -]+", "_", name)
+    name = name.strip(" .")
+    return name or "attachment"
+
+
+def unique_filename(name: str, used: set) -> str:
+    if name not in used and name != "ticket.md":
+        used.add(name)
+        return name
+    root, ext = os.path.splitext(name)
+    counter = 2
+    while True:
+        candidate = f"{root}_{counter}{ext}"
+        if candidate not in used and candidate != "ticket.md":
+            used.add(candidate)
+            return candidate
+        counter += 1
+
+
+def attachment_bytes(attachment: Dict[str, Any]) -> bytes:
+    for key in ATTACHMENT_CONTENT_KEYS:
+        value = attachment.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, str):
+            try:
+                return base64.b64decode(value, validate=True)
+            except (ValueError, binascii.Error) as exc:
+                raise ValueError(
+                    f"Attachment content is not valid base64 for key '{key}'"
+                ) from exc
+    raise ValueError("Attachment content is missing")
+
+
+def resolve_attachment_timestamp(attachment: Dict[str, Any]) -> str:
+    return require_value(
+        pick_first_key(attachment, ATTACHMENT_TIMESTAMP_KEYS),
+        "attachment timestamp",
+    )
+
+
+def resolve_message_timestamp(message: Dict[str, Any]) -> str:
+    return require_value(
+        pick_first_key(message, MESSAGE_TIMESTAMP_KEYS),
+        "message timestamp",
+    )
+
+
+def write_attachment(
+    attachment: Dict[str, Any],
+    dest_dir: str,
+    used_names: set,
+) -> str:
+    name = require_value(
+        pick_first_key(attachment, ATTACHMENT_NAME_KEYS),
+        "attachment filename",
+    )
+    safe_name = sanitize_filename(name)
+    safe_name = unique_filename(safe_name, used_names)
+    dest_path = os.path.join(dest_dir, safe_name)
+
+    file_path = attachment.get("file_path")
+    if isinstance(file_path, str) and os.path.isfile(file_path):
+        shutil.copyfile(file_path, dest_path)
+        return safe_name
+
+    payload = attachment_bytes(attachment)
+    with open(dest_path, "wb") as handle:
+        handle.write(payload)
+    return safe_name
+
+
+def build_ticket_markdown(
+    incident_number: str,
+    short_description: Optional[str],
+    status: Optional[str],
+    opened: Optional[str],
+    closed: Optional[str],
+    timeline: List[Dict[str, Any]],
+) -> str:
+    title = incident_number
+    if short_description:
+        title = f"{incident_number} - {short_description}"
+
+    lines = [f"# {title}", ""]
+    if status:
+        lines.append(f"- Status: {status}")
+    if opened:
+        lines.append(f"- Opened: {opened}")
+    if closed:
+        lines.append(f"- Closed: {closed}")
+    lines.append("")
+
+    for entry in timeline:
+        if entry["type"] == "message":
+            heading = entry["author"]
+            if entry.get("internal"):
+                heading = f"{heading} (internal)"
+            lines.extend([f"## {heading}", ""])
+            text = entry.get("text") or ""
+            lines.append(text.rstrip())
+            lines.append("")
+        elif entry["type"] == "attachments":
+            lines.extend(["## Attachments", ""])
+            for name in entry["files"]:
+                lines.append(f"- `{name}`")
+            lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def build_timeline(
+    messages: List[Dict[str, Any]],
+    attachments: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    timeline: List[Dict[str, Any]] = []
+    index = 0
+
+    for message in messages:
+        timestamp = resolve_message_timestamp(message)
+        timeline.append(
+            {
+                "type": "message",
+                "timestamp": timestamp,
+                "timestamp_dt": parse_timestamp(timestamp),
+                "author": require_value(message.get("created_by"), "message author"),
+                "internal": message.get("internal", False),
+                "text": message.get("text") or "",
+                "order": index,
+            }
+        )
+        index += 1
+
+    for attachment in attachments:
+        timestamp = resolve_attachment_timestamp(attachment)
+        timeline.append(
+            {
+                "type": "attachment",
+                "timestamp": timestamp,
+                "timestamp_dt": parse_timestamp(timestamp),
+                "file": attachment["resolved_name"],
+                "order": index,
+            }
+        )
+        index += 1
+
+    def sort_key(item: Dict[str, Any]) -> Tuple:
+        timestamp_dt = item.get("timestamp_dt")
+        timestamp_raw = item.get("timestamp") or ""
+        kind_priority = 0 if item["type"] == "message" else 1
+        return (timestamp_dt, timestamp_raw, kind_priority, item["order"])
+
+    timeline.sort(key=sort_key)
+
+    merged: List[Dict[str, Any]] = []
+    buffer_files: List[str] = []
+    for item in timeline:
+        if item["type"] == "attachment":
+            buffer_files.append(item["file"])
+            continue
+        if buffer_files:
+            merged.append({"type": "attachments", "files": buffer_files})
+            buffer_files = []
+        merged.append(item)
+
+    if buffer_files:
+        merged.append({"type": "attachments", "files": buffer_files})
+
+    return merged
+
+
+def extract_messages(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    discussions = data.get("discussions") or {}
+    messages: List[Dict[str, Any]] = []
+
+    for comment in discussions.get("customer_facing_comments", []) or []:
+        comment["internal"] = False
+        messages.append(comment)
+
+    for note in discussions.get("internal_work_notes", []) or []:
+        note["internal"] = True
+        messages.append(note)
+
+    return messages
+
+
+def extract_attachments(data: Dict[str, Any], dest_dir: str) -> List[Dict[str, Any]]:
+    attachments = data.get("attachments") or []
+    if not isinstance(attachments, list):
+        raise ValueError("Attachments must be a list")
+
+    used_names: set = set()
+    resolved: List[Dict[str, Any]] = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            raise ValueError("Attachment entry must be a dict")
+        name = write_attachment(attachment, dest_dir, used_names)
+        attachment["resolved_name"] = name
+        resolved.append(attachment)
+
+    return resolved
+
+
+def ensure_output_root() -> None:
+    if os.path.isdir(OUTPUT_ROOT):
+        shutil.rmtree(OUTPUT_ROOT)
+    os.makedirs(OUTPUT_ROOT, exist_ok=True)
+
+
+def write_agents_md() -> None:
+    agents_path = os.path.join(OUTPUT_ROOT, "AGENTS.md")
+    content = (
+        "# Tickets Folder\n\n"
+        f"Tickets are stored at: {OUTPUT_ROOT}\n\n"
+        "Structure:\n\n"
+        "```\n"
+        "/tickets/YYYY/MM/INC########/\n"
+        "  ticket.md\n"
+        "  <attachment files>\n"
+        "```\n"
+    )
+    with open(agents_path, "w", encoding="utf-8") as handle:
+        handle.write(content)
+
+
+def iter_json_files(root: str) -> Iterable[str]:
+    for dirpath, _, filenames in os.walk(root):
+        for filename in filenames:
+            if filename.endswith(".json"):
+                yield os.path.join(dirpath, filename)
+
+
+def main() -> None:
+    if not os.path.isdir(SOURCE_ROOT):
+        raise FileNotFoundError(f"Source root not found: {SOURCE_ROOT}")
+    ensure_output_root()
+
+    for path in iter_json_files(SOURCE_ROOT):
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+
+        metadata = data.get("metadata") or {}
+        incident_fields = data.get("incident_fields") or {}
+
+        incident_number = require_value(
+            metadata.get("incident_number") or incident_fields.get("number"),
+            "incident number",
+        )
+        short_description = incident_fields.get("short_description")
+        status = require_value(incident_fields.get("state"), "status")
+
+        opened_raw = require_value(
+            incident_fields.get("opened_at") or incident_fields.get("sys_created_on"),
+            "opened date",
+        )
+        closed_raw = incident_fields.get("closed_at") or incident_fields.get(
+            "resolved_at"
+        )
+        opened = date_only(opened_raw)
+        closed = date_only(closed_raw) if closed_raw else None
+
+        parts = opened.split("-")
+        if len(parts) < 2:
+            raise ValueError(f"Opened date is not YYYY-MM-DD: {opened}")
+        year, month = parts[0], parts[1]
+
+        ticket_dir = os.path.join(OUTPUT_ROOT, year, month, incident_number)
+        os.makedirs(ticket_dir, exist_ok=True)
+
+        messages = extract_messages(data)
+        attachments = extract_attachments(data, ticket_dir)
+        timeline = build_timeline(messages, attachments)
+
+        ticket_md = build_ticket_markdown(
+            incident_number=incident_number,
+            short_description=short_description,
+            status=status,
+            opened=opened,
+            closed=closed,
+            timeline=timeline,
+        )
+
+        with open(os.path.join(ticket_dir, "ticket.md"), "w", encoding="utf-8") as handle:
+            handle.write(ticket_md)
+
+    write_agents_md()
+
+
+if __name__ == "__main__":
+    main()
