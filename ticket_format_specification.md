@@ -108,7 +108,7 @@ Users report intermittent login failures after 5pm PT.
 - `error_screenshot.png`
 - `auth_logs.txt`
 
-## Ops Team (internal)
+## Ops Team (staff work notes)
 
 Identified expired certificate on auth proxy. Rotated cert and restarted.
 ```
