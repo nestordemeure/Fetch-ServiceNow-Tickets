@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import sys
+import threading
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -468,13 +469,25 @@ def extract_attachments(data: Dict[str, Any], dest_dir: str) -> List[Dict[str, A
     return resolved
 
 
-def ensure_output_root() -> None:
-    sys.stderr.write("Preparing output folder...\n")
+def ensure_output_root() -> Optional[threading.Thread]:
+    cleanup_thread: Optional[threading.Thread] = None
     if os.path.isdir(OUTPUT_ROOT):
-        sys.stderr.write("Deleting existing output folder...\n")
-        shutil.rmtree(OUTPUT_ROOT)
-    sys.stderr.write("Creating output folder...\n")
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        old_path = f"{OUTPUT_ROOT}.old-{timestamp}-{os.getpid()}"
+        os.rename(OUTPUT_ROOT, old_path)
+
+        def cleanup() -> None:
+            try:
+                shutil.rmtree(old_path)
+            except Exception as exc:
+                sys.stderr.write(
+                    f"Failed to delete old output folder {old_path}: {exc}\n"
+                )
+
+        cleanup_thread = threading.Thread(target=cleanup)
+        cleanup_thread.start()
     os.makedirs(OUTPUT_ROOT, exist_ok=True)
+    return cleanup_thread
 
 
 def write_agents_md() -> None:
@@ -562,9 +575,8 @@ def render_progress(done: int, total: int) -> None:
 def main() -> None:
     if not os.path.isdir(SOURCE_ROOT):
         raise FileNotFoundError(f"Source root not found: {SOURCE_ROOT}")
-    ensure_output_root()
+    cleanup_thread = ensure_output_root()
 
-    sys.stderr.write("Scanning raw tickets for JSON files...\n")
     paths = list(iter_json_files(SOURCE_ROOT))
     total = len(paths)
     if total == 0:
@@ -584,6 +596,8 @@ def main() -> None:
 
     sys.stderr.write("\n")
     write_agents_md()
+    if cleanup_thread is not None:
+        cleanup_thread.join()
 
 
 if __name__ == "__main__":
