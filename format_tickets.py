@@ -111,23 +111,27 @@ def is_trailing_date_line(line: str) -> bool:
     return False
 
 
-def clean_message_text(text: str) -> str:
+def clean_message_text(text: str, author: Optional[str] = None) -> str:
     lines = text.splitlines()
     filtered = list(lines)
+
+    def normalize_line_token(line: str) -> str:
+        stripped = line.strip()
+        return re.sub(r"^-+\s*", "", stripped)
 
     def is_greeting_line(line: str) -> bool:
         stripped = line.strip()
         if not stripped:
             return False
         pattern = (
-            r"^(hi|hello|hey)(\s+[^,]+)?[,!]?$|"
-            r"^dear\s+[^,]+[,!]?$|"
-            r"^good (morning|afternoon|evening)(\s+[^,]+)?[,!]?$"
+            r"^(hi|hello|hey)(\s+[^,]+)?[,!:.]?$|"
+            r"^dear\s+[^,]+[,!:.]?$|"
+            r"^good (morning|afternoon|evening)(\s+[^,]+)?[,!:.]?$"
         )
         return re.match(pattern, stripped, re.IGNORECASE) is not None
 
     def is_signoff_line(line: str) -> bool:
-        stripped = line.strip()
+        stripped = normalize_line_token(line)
         if not stripped:
             return False
         pattern = (
@@ -138,7 +142,7 @@ def clean_message_text(text: str) -> str:
         return re.match(pattern, stripped, re.IGNORECASE) is not None
 
     def is_name_line(line: str) -> bool:
-        stripped = line.strip()
+        stripped = normalize_line_token(line)
         if not stripped:
             return False
         pattern = r"^[A-Za-z][A-Za-z.'-]*(\s+[A-Za-z][A-Za-z.'-]*){0,3}$"
@@ -154,7 +158,7 @@ def clean_message_text(text: str) -> str:
         footer_patterns = [
             r"^nersc account and allocation support\.?$",
             r"^nersc account & allocations support\.?$",
-            r"^nersc consulting\.?$",
+            r"^nersc consulting(\s*\|{1,2}\s*user engagement group\s*\(ueg\))?\.?$",
             r"^nersc account support:?\s*$",
             r"^nersc account support:\s*accounts@nersc\.gov\.?$",
             r"^accounts@nersc\.gov\.?$",
@@ -163,6 +167,26 @@ def clean_message_text(text: str) -> str:
             if re.match(pattern, lower):
                 return True
         return False
+
+    def is_author_name_line(line: str) -> bool:
+        if not author:
+            return False
+        stripped = normalize_line_token(line)
+        if not stripped:
+            return False
+        content = re.sub(r"^>+\s*", "", stripped).strip()
+        content = normalize_line_token(content)
+        name_base = author.split(" (", 1)[0].strip()
+        if not name_base:
+            return False
+        name_parts = name_base.split()
+        first_name = name_parts[0]
+        matches = {name_base.lower(), first_name.lower()}
+        if len(name_parts) > 1:
+            last_initial = name_parts[-1][0]
+            matches.add(f"{first_name} {last_initial}".lower())
+            matches.add(f"{first_name} {last_initial}.".lower())
+        return content.lower() in matches
 
     # Only remove metadata if it appears as the first non-empty lines.
     def strip_leading_metadata() -> None:
@@ -213,6 +237,8 @@ def clean_message_text(text: str) -> str:
         elif tail.lower().startswith("on ") and " at " in tail.lower():
             filtered.pop(last_non_empty)
 
+    filtered = [line for line in filtered if not is_footer_line(line)]
+
     # Remove a closing signoff line, with an optional name line immediately after.
     last_non_empty = None
     for idx in range(len(filtered) - 1, -1, -1):
@@ -237,7 +263,7 @@ def clean_message_text(text: str) -> str:
                 for idx in range(last_non_empty, signoff_idx - 1, -1):
                     filtered.pop(idx)
 
-    filtered = [line for line in filtered if not is_footer_line(line)]
+    filtered = [line for line in filtered if not is_author_name_line(line)]
 
     while filtered and filtered[0].strip() == "":
         filtered.pop(0)
@@ -251,6 +277,14 @@ def is_iris_pi_request(short_description: Optional[str]) -> bool:
     if not short_description:
         return False
     return short_description.strip().lower() == "ticket from iris: new pi account request"
+
+
+def is_storage_quota_increase(short_description: Optional[str]) -> bool:
+    if not short_description:
+        return False
+    return short_description.strip().lower().startswith(
+        "storage quota increase request:"
+    )
 
 
 def normalize_author(name: str, internal: bool) -> str:
@@ -444,24 +478,20 @@ def extract_messages(data: Dict[str, Any]) -> List[Dict[str, Any]]:
         created_by = comment.get("created_by")
         if isinstance(created_by, str) and created_by.strip().lower() == "system":
             continue
-        comment["text"] = clean_message_text(comment.get("text") or "")
+        author = require_value(comment.get("created_by"), "message author")
+        comment["text"] = clean_message_text(comment.get("text") or "", author)
         comment["internal"] = False
-        comment["created_by"] = normalize_author(
-            require_value(comment.get("created_by"), "message author"),
-            False,
-        )
+        comment["created_by"] = normalize_author(author, False)
         messages.append(comment)
 
     for note in discussions.get("internal_work_notes", []) or []:
         created_by = note.get("created_by")
         if isinstance(created_by, str) and created_by.strip().lower() == "system":
             continue
-        note["text"] = clean_message_text(note.get("text") or "")
+        author = require_value(note.get("created_by"), "message author")
+        note["text"] = clean_message_text(note.get("text") or "", author)
         note["internal"] = True
-        note["created_by"] = normalize_author(
-            require_value(note.get("created_by"), "message author"),
-            True,
-        )
+        note["created_by"] = normalize_author(author, True)
         messages.append(note)
 
     deduped: List[Dict[str, Any]] = []
@@ -552,7 +582,9 @@ def process_ticket_file(path: str) -> None:
     incident_fields = data.get("incident_fields") or {}
 
     short_description = incident_fields.get("short_description")
-    if is_iris_pi_request(short_description):
+    if is_iris_pi_request(short_description) or is_storage_quota_increase(
+        short_description
+    ):
         return
 
     attachments_raw = data.get("attachments") or []
@@ -560,11 +592,9 @@ def process_ticket_file(path: str) -> None:
         raise ValueError("Attachments must be a list")
 
     messages = extract_messages(data)
-    if (
-        len(messages) == 1
-        and not messages[0].get("internal", False)
-        and not attachments_raw
-    ):
+    if not messages:
+        return
+    if len(messages) == 1 and not attachments_raw:
         return
 
     incident_number = require_value(

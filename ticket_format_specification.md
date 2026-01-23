@@ -90,11 +90,14 @@ Rules:
 - Messages: If two consecutive messages have identical text after normalization and the same internal/customer visibility, keep only the first.
 - Messages: If internal author strings include a staff work notes suffix (e.g., `(... Staff work notes ...)`), drop that suffix and use a `(staff work notes)` heading label.
 - Messages: Remove standalone footer lines such as `NERSC Account and Allocation Support`, `NERSC Account & Allocations Support`, or `NERSC Consulting`. Remove the `NERSC Account Support:` and `accounts@nersc.gov` footer lines (quoted or unquoted).
+- Messages: Remove lines that are just the author's first name or full name (quoted or unquoted).
 
 ### Filtering
 
 - Skip tickets whose `short_description` is exactly `Ticket from Iris: New PI Account Request`.
-- Skip tickets with exactly one customer-facing message and no attachments.
+- Skip tickets whose `short_description` starts with `Storage Quota Increase request:`.
+- Skip tickets with zero messages.
+- Skip tickets with exactly one message and no attachments.
 
 ## Example ticket.md file
 
