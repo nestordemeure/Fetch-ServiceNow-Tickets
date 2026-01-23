@@ -57,9 +57,10 @@ Format:
 ```
 
 Guidance:
-- Use `(internal)` for work notes. Customer-facing comments have no label.
+- Use `(staff work notes)` for internal work notes. Customer-facing comments have no label.
 - Preserve original text.
 - Keep ordering chronological (oldest first) based on each message timestamp.
+- Skip system messages (created by `System`).
 
 ### Attachments in the Timeline
 
@@ -85,6 +86,9 @@ Rules:
 - Dates: Use only the date portion (`YYYY-MM-DD`) for Opened/Closed.
 - Names: Use display names as provided in the raw data.
 - Whitespace: Trim trailing spaces, keep intentional line breaks inside messages.
+- Messages: Remove leading metadata lines if the first non-empty lines are `reply from:`, `created by:`, `created by reply`, or `updated by reply`. Drop a trailing line only if the last non-empty line is a standalone date or an English email quote line like `On Fri, Dec 13, 2024 at 9:51 AM`. Trim leading and trailing blank lines around the message body.
+- Messages: If two consecutive messages have identical text after normalization and the same internal/customer visibility, keep only the first.
+- Messages: If internal author strings include a staff work notes suffix (e.g., `(... Staff work notes ...)`), drop that suffix and use a `(staff work notes)` heading label.
 
 ## Example ticket.md file
 

@@ -11,7 +11,9 @@ import json
 import os
 import re
 import shutil
+import sys
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
@@ -82,6 +84,92 @@ def require_value(value: Optional[str], context: str) -> str:
     if value is None or value == "":
         raise ValueError(f"Missing required value: {context}")
     return value
+
+
+def is_trailing_date_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped or len(stripped) > 40:
+        return False
+    tz_tokens = {"PDT", "PST", "UTC", "GMT"}
+    parts = stripped.split()
+    if parts and parts[-1] in tz_tokens:
+        stripped = " ".join(parts[:-1])
+    formats = [
+        "%Y-%m-%d",
+        "%Y-%m-%d %H:%M:%S",
+        "%b %d, %Y",
+        "%b %d, %Y, %H:%M",
+        "%B %d, %Y",
+        "%B %d, %Y, %H:%M",
+    ]
+    for fmt in formats:
+        try:
+            datetime.strptime(stripped, fmt)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def clean_message_text(text: str) -> str:
+    lines = text.splitlines()
+    filtered = list(lines)
+
+    # Only remove metadata if it appears as the first non-empty lines.
+    def strip_leading_metadata() -> None:
+        while True:
+            idx = None
+            for i, line in enumerate(filtered):
+                if line.strip() == "":
+                    continue
+                idx = i
+                break
+            if idx is None:
+                return
+            value = filtered[idx].strip().lower()
+            if value.startswith("reply from:"):
+                filtered.pop(idx)
+                continue
+            if value.startswith("created by:"):
+                filtered.pop(idx)
+                continue
+            if value.startswith("created by reply"):
+                filtered.pop(idx)
+                continue
+            if value.startswith("updated by reply"):
+                filtered.pop(idx)
+                continue
+            return
+
+    strip_leading_metadata()
+
+    # Only remove a trailing date line if it is the last non-empty line.
+    last_non_empty = None
+    for idx in range(len(filtered) - 1, -1, -1):
+        if filtered[idx].strip() != "":
+            last_non_empty = idx
+            break
+    if last_non_empty is not None:
+        tail = filtered[last_non_empty].strip()
+        if is_trailing_date_line(tail):
+            filtered.pop(last_non_empty)
+        elif tail.lower().startswith("on ") and " at " in tail.lower():
+            filtered.pop(last_non_empty)
+
+    while filtered and filtered[0].strip() == "":
+        filtered.pop(0)
+    while filtered and filtered[-1].strip() == "":
+        filtered.pop()
+
+    return "\n".join(filtered)
+
+
+def normalize_author(name: str, internal: bool) -> str:
+    if internal and " (staff work notes" in name.lower():
+        lower = name.lower()
+        idx = lower.find(" (staff work notes")
+        name = name[:idx].rstrip()
+    return name
 
 
 def sanitize_filename(name: str) -> str:
@@ -185,7 +273,7 @@ def build_ticket_markdown(
         if entry["type"] == "message":
             heading = entry["author"]
             if entry.get("internal"):
-                heading = f"{heading} (internal)"
+                heading = f"{heading} (staff work notes)"
             lines.extend([f"## {heading}", ""])
             text = entry.get("text") or ""
             lines.append(text.rstrip())
@@ -264,14 +352,42 @@ def extract_messages(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     messages: List[Dict[str, Any]] = []
 
     for comment in discussions.get("customer_facing_comments", []) or []:
+        created_by = comment.get("created_by")
+        if isinstance(created_by, str) and created_by.strip().lower() == "system":
+            continue
+        comment["text"] = clean_message_text(comment.get("text") or "")
         comment["internal"] = False
+        comment["created_by"] = normalize_author(
+            require_value(comment.get("created_by"), "message author"),
+            False,
+        )
         messages.append(comment)
 
     for note in discussions.get("internal_work_notes", []) or []:
+        created_by = note.get("created_by")
+        if isinstance(created_by, str) and created_by.strip().lower() == "system":
+            continue
+        note["text"] = clean_message_text(note.get("text") or "")
         note["internal"] = True
+        note["created_by"] = normalize_author(
+            require_value(note.get("created_by"), "message author"),
+            True,
+        )
         messages.append(note)
 
-    return messages
+    deduped: List[Dict[str, Any]] = []
+    last_text = None
+    last_internal = None
+    for message in messages:
+        text = message.get("text") or ""
+        internal = message.get("internal", False)
+        if text == last_text and internal == last_internal:
+            continue
+        deduped.append(message)
+        last_text = text
+        last_internal = internal
+
+    return deduped
 
 
 def extract_attachments(data: Dict[str, Any], dest_dir: str) -> List[Dict[str, Any]]:
@@ -300,14 +416,19 @@ def ensure_output_root() -> None:
 def write_agents_md() -> None:
     agents_path = os.path.join(OUTPUT_ROOT, "AGENTS.md")
     content = (
-        "# Tickets Folder\n\n"
-        f"Tickets are stored at: {OUTPUT_ROOT}\n\n"
-        "Structure:\n\n"
+        "# NERSC ServiceNow Tickets\n\n"
+        f"Tickets are stored at: `{OUTPUT_ROOT}`\n\n"
+        "Each ticket has its own folder containing a `ticket.md` file plus any "
+        "attachments for that ticket (if present).\n"
+        "Attachments live alongside the markdown file in the same folder.\n\n"
+        "File structure:\n\n"
         "```\n"
         "/tickets/YYYY/MM/INC########/\n"
         "  ticket.md\n"
         "  <attachment files>\n"
-        "```\n"
+        "```\n\n"
+        "While you are not allowed to modify those files, you should search them "
+        "for past solutions to problems and other useful information.\n"
     )
     with open(agents_path, "w", encoding="utf-8") as handle:
         handle.write(content)
@@ -320,59 +441,83 @@ def iter_json_files(root: str) -> Iterable[str]:
                 yield os.path.join(dirpath, filename)
 
 
+def process_ticket_file(path: str) -> None:
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+
+    metadata = data.get("metadata") or {}
+    incident_fields = data.get("incident_fields") or {}
+
+    incident_number = require_value(
+        metadata.get("incident_number") or incident_fields.get("number"),
+        "incident number",
+    )
+    short_description = incident_fields.get("short_description")
+    status = require_value(incident_fields.get("state"), "status")
+
+    opened_raw = require_value(
+        incident_fields.get("opened_at") or incident_fields.get("sys_created_on"),
+        "opened date",
+    )
+    closed_raw = incident_fields.get("closed_at") or incident_fields.get(
+        "resolved_at"
+    )
+    opened = date_only(opened_raw)
+    closed = date_only(closed_raw) if closed_raw else None
+
+    parts = opened.split("-")
+    if len(parts) < 2:
+        raise ValueError(f"Opened date is not YYYY-MM-DD: {opened}")
+    year, month = parts[0], parts[1]
+
+    ticket_dir = os.path.join(OUTPUT_ROOT, year, month, incident_number)
+    os.makedirs(ticket_dir, exist_ok=True)
+
+    messages = extract_messages(data)
+    attachments = extract_attachments(data, ticket_dir)
+    timeline = build_timeline(messages, attachments)
+
+    ticket_md = build_ticket_markdown(
+        incident_number=incident_number,
+        short_description=short_description,
+        status=status,
+        opened=opened,
+        closed=closed,
+        timeline=timeline,
+    )
+
+    with open(os.path.join(ticket_dir, "ticket.md"), "w", encoding="utf-8") as handle:
+        handle.write(ticket_md)
+
+
+def render_progress(done: int, total: int) -> None:
+    sys.stderr.write(f"\rProcessed {done}/{total} tickets")
+    sys.stderr.flush()
+
+
 def main() -> None:
     if not os.path.isdir(SOURCE_ROOT):
         raise FileNotFoundError(f"Source root not found: {SOURCE_ROOT}")
     ensure_output_root()
 
-    for path in iter_json_files(SOURCE_ROOT):
-        with open(path, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
+    paths = list(iter_json_files(SOURCE_ROOT))
+    total = len(paths)
+    if total == 0:
+        raise ValueError(f"No JSON files found under {SOURCE_ROOT}")
 
-        metadata = data.get("metadata") or {}
-        incident_fields = data.get("incident_fields") or {}
+    render_progress(0, total)
 
-        incident_number = require_value(
-            metadata.get("incident_number") or incident_fields.get("number"),
-            "incident number",
-        )
-        short_description = incident_fields.get("short_description")
-        status = require_value(incident_fields.get("state"), "status")
+    max_workers = min(32, (os.cpu_count() or 4) * 2)
+    done = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(process_ticket_file, path) for path in paths]
+        for future in as_completed(futures):
+            future.result()
+            done += 1
+            if done == total or done % 50 == 0:
+                render_progress(done, total)
 
-        opened_raw = require_value(
-            incident_fields.get("opened_at") or incident_fields.get("sys_created_on"),
-            "opened date",
-        )
-        closed_raw = incident_fields.get("closed_at") or incident_fields.get(
-            "resolved_at"
-        )
-        opened = date_only(opened_raw)
-        closed = date_only(closed_raw) if closed_raw else None
-
-        parts = opened.split("-")
-        if len(parts) < 2:
-            raise ValueError(f"Opened date is not YYYY-MM-DD: {opened}")
-        year, month = parts[0], parts[1]
-
-        ticket_dir = os.path.join(OUTPUT_ROOT, year, month, incident_number)
-        os.makedirs(ticket_dir, exist_ok=True)
-
-        messages = extract_messages(data)
-        attachments = extract_attachments(data, ticket_dir)
-        timeline = build_timeline(messages, attachments)
-
-        ticket_md = build_ticket_markdown(
-            incident_number=incident_number,
-            short_description=short_description,
-            status=status,
-            opened=opened,
-            closed=closed,
-            timeline=timeline,
-        )
-
-        with open(os.path.join(ticket_dir, "ticket.md"), "w", encoding="utf-8") as handle:
-            handle.write(ticket_md)
-
+    sys.stderr.write("\n")
     write_agents_md()
 
 
