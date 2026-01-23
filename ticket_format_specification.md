@@ -89,15 +89,19 @@ Rules:
 - Messages: Remove leading metadata lines if the first non-empty lines are `reply from:`, `created by:`, `created by reply`, or `updated by reply`. Remove a leading greeting line if the first non-empty line is `Hi`, `Hello`, `Hey`, `Good morning/afternoon/evening`, or `Dear <name>` (comma or exclamation optional). Drop a trailing line only if the last non-empty line is a standalone date or an English email quote line like `On Fri, Dec 13, 2024 at 9:51 AM`. Remove a trailing signoff line if the last non-empty line is `Best`, `Regards`, `Cordially`, `Thanks`, `Thank you`, `Kind regards`, `Best regards`, `Warm regards`, `Best wishes`, `Many thanks`, `Sincerely`, or `Cheers` (comma or exclamation optional), optionally followed by a name on the next line (or a blank line, then name). Trim leading and trailing blank lines around the message body.
 - Messages: If two consecutive messages have identical text after normalization and the same internal/customer visibility, keep only the first.
 - Messages: If internal author strings include a staff work notes suffix (e.g., `(... Staff work notes ...)`), drop that suffix and use a `(staff work notes)` heading label.
-- Messages: Remove standalone footer lines such as `NERSC Account and Allocation Support`, `NERSC Account & Allocations Support`, or `NERSC Consulting`. Remove the `NERSC Account Support:` and `accounts@nersc.gov` footer lines (quoted or unquoted).
+- Messages: Remove standalone footer lines such as `NERSC Account and Allocation Support`, `NERSC Account & Allocations Support`, `NERSC Consulting`, or `NERSC User Engagement Group Lead`. Remove the `NERSC Account Support:` and `accounts@nersc.gov` footer lines (quoted or unquoted).
 - Messages: Remove lines that are just the author's first name or full name (quoted or unquoted).
 
 ### Filtering
 
 - Skip tickets whose `short_description` is exactly `Ticket from Iris: New PI Account Request`.
 - Skip tickets whose `short_description` starts with `Storage Quota Increase request:`.
+- Skip tickets whose `short_description` matches `Renewal of <training-name> Training for Staff`.
+- Skip tickets whose `short_description` includes `NERSC Account activation`.
 - Skip tickets with zero messages.
 - Skip tickets with exactly one message and no attachments.
+- Skip tickets where all messages are authored by `autoticketing` and/or `pm-node-info-bot`.
+- Skip messages that become empty after normalization.
 
 ## Example ticket.md file
 

@@ -159,6 +159,7 @@ def clean_message_text(text: str, author: Optional[str] = None) -> str:
             r"^nersc account and allocation support\.?$",
             r"^nersc account & allocations support\.?$",
             r"^nersc consulting(\s*\|{1,2}\s*user engagement group\s*\(ueg\))?\.?$",
+            r"^nersc user engagement group lead\.?$",
             r"^nersc account support:?\s*$",
             r"^nersc account support:\s*accounts@nersc\.gov\.?$",
             r"^accounts@nersc\.gov\.?$",
@@ -285,6 +286,22 @@ def is_storage_quota_increase(short_description: Optional[str]) -> bool:
     return short_description.strip().lower().startswith(
         "storage quota increase request:"
     )
+
+
+def is_training_renewal(short_description: Optional[str]) -> bool:
+    if not short_description:
+        return False
+    return re.match(
+        r"^renewal of .+ training for staff$",
+        short_description.strip(),
+        re.IGNORECASE,
+    ) is not None
+
+
+def is_nersc_account_activation(short_description: Optional[str]) -> bool:
+    if not short_description:
+        return False
+    return "nersc account activation" in short_description.strip().lower()
 
 
 def normalize_author(name: str, internal: bool) -> str:
@@ -480,6 +497,8 @@ def extract_messages(data: Dict[str, Any]) -> List[Dict[str, Any]]:
             continue
         author = require_value(comment.get("created_by"), "message author")
         comment["text"] = clean_message_text(comment.get("text") or "", author)
+        if not comment["text"].strip():
+            continue
         comment["internal"] = False
         comment["created_by"] = normalize_author(author, False)
         messages.append(comment)
@@ -490,6 +509,8 @@ def extract_messages(data: Dict[str, Any]) -> List[Dict[str, Any]]:
             continue
         author = require_value(note.get("created_by"), "message author")
         note["text"] = clean_message_text(note.get("text") or "", author)
+        if not note["text"].strip():
+            continue
         note["internal"] = True
         note["created_by"] = normalize_author(author, True)
         messages.append(note)
@@ -582,8 +603,11 @@ def process_ticket_file(path: str) -> None:
     incident_fields = data.get("incident_fields") or {}
 
     short_description = incident_fields.get("short_description")
-    if is_iris_pi_request(short_description) or is_storage_quota_increase(
-        short_description
+    if (
+        is_iris_pi_request(short_description)
+        or is_storage_quota_increase(short_description)
+        or is_training_renewal(short_description)
+        or is_nersc_account_activation(short_description)
     ):
         return
 
@@ -593,6 +617,12 @@ def process_ticket_file(path: str) -> None:
 
     messages = extract_messages(data)
     if not messages:
+        return
+    if all(
+        (message.get("created_by") or "").strip().lower()
+        in {"autoticketing", "pm-node-info-bot"}
+        for message in messages
+    ):
         return
     if len(messages) == 1 and not attachments_raw:
         return
