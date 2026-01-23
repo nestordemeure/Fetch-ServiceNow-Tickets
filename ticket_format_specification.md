@@ -86,7 +86,7 @@ Rules:
 - Dates: Use only the date portion (`YYYY-MM-DD`) for Opened/Closed.
 - Names: Use display names as provided in the raw data.
 - Whitespace: Trim trailing spaces, keep intentional line breaks inside messages.
-- Messages: Remove leading metadata lines if the first non-empty lines are `reply from:`, `created by:`, `created by reply`, or `updated by reply`. Drop a trailing line only if the last non-empty line is a standalone date or an English email quote line like `On Fri, Dec 13, 2024 at 9:51 AM`. Trim leading and trailing blank lines around the message body.
+- Messages: Remove leading metadata lines if the first non-empty lines are `reply from:`, `created by:`, `created by reply`, or `updated by reply`. Remove a leading greeting line if the first non-empty line is `Hi`, `Hello`, `Hey`, `Good morning/afternoon/evening`, or `Dear <name>` (comma or exclamation optional). Drop a trailing line only if the last non-empty line is a standalone date or an English email quote line like `On Fri, Dec 13, 2024 at 9:51 AM`. Remove a trailing signoff line if the last non-empty line is `Best`, `Regards`, `Cordially`, `Thanks`, `Thank you`, `Kind regards`, `Best regards`, `Warm regards`, `Best wishes`, `Many thanks`, `Sincerely`, or `Cheers` (comma or exclamation optional), optionally followed by a name on the next line (or a blank line, then name). Trim leading and trailing blank lines around the message body.
 - Messages: If two consecutive messages have identical text after normalization and the same internal/customer visibility, keep only the first.
 - Messages: If internal author strings include a staff work notes suffix (e.g., `(... Staff work notes ...)`), drop that suffix and use a `(staff work notes)` heading label.
 

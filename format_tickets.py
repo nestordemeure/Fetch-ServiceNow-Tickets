@@ -115,6 +115,35 @@ def clean_message_text(text: str) -> str:
     lines = text.splitlines()
     filtered = list(lines)
 
+    def is_greeting_line(line: str) -> bool:
+        stripped = line.strip()
+        if not stripped:
+            return False
+        pattern = (
+            r"^(hi|hello|hey)(\s+[^,]+)?[,!]?$|"
+            r"^dear\s+[^,]+[,!]?$|"
+            r"^good (morning|afternoon|evening)(\s+[^,]+)?[,!]?$"
+        )
+        return re.match(pattern, stripped, re.IGNORECASE) is not None
+
+    def is_signoff_line(line: str) -> bool:
+        stripped = line.strip()
+        if not stripped:
+            return False
+        pattern = (
+            r"^(best|regards|cordially|thanks|thank you|kind regards|"
+            r"best regards|warm regards|best wishes|many thanks|"
+            r"sincerely|cheers)[,\.!]?$"
+        )
+        return re.match(pattern, stripped, re.IGNORECASE) is not None
+
+    def is_name_line(line: str) -> bool:
+        stripped = line.strip()
+        if not stripped:
+            return False
+        pattern = r"^[A-Za-z][A-Za-z.'-]*(\s+[A-Za-z][A-Za-z.'-]*){0,3}$"
+        return re.match(pattern, stripped) is not None
+
     # Only remove metadata if it appears as the first non-empty lines.
     def strip_leading_metadata() -> None:
         while True:
@@ -143,6 +172,14 @@ def clean_message_text(text: str) -> str:
 
     strip_leading_metadata()
 
+    # Remove greeting line if it is the first non-empty line.
+    for i, line in enumerate(filtered):
+        if line.strip() == "":
+            continue
+        if is_greeting_line(line):
+            filtered.pop(i)
+        break
+
     # Only remove a trailing date line if it is the last non-empty line.
     last_non_empty = None
     for idx in range(len(filtered) - 1, -1, -1):
@@ -155,6 +192,30 @@ def clean_message_text(text: str) -> str:
             filtered.pop(last_non_empty)
         elif tail.lower().startswith("on ") and " at " in tail.lower():
             filtered.pop(last_non_empty)
+
+    # Remove a closing signoff line, with an optional name line immediately after.
+    last_non_empty = None
+    for idx in range(len(filtered) - 1, -1, -1):
+        if filtered[idx].strip() != "":
+            last_non_empty = idx
+            break
+    if last_non_empty is not None:
+        if is_signoff_line(filtered[last_non_empty]):
+            filtered.pop(last_non_empty)
+        else:
+            signoff_idx = None
+            for idx in range(last_non_empty - 1, -1, -1):
+                if filtered[idx].strip() == "":
+                    continue
+                signoff_idx = idx
+                break
+            if (
+                signoff_idx is not None
+                and is_signoff_line(filtered[signoff_idx])
+                and is_name_line(filtered[last_non_empty])
+            ):
+                for idx in range(last_non_empty, signoff_idx - 1, -1):
+                    filtered.pop(idx)
 
     while filtered and filtered[0].strip() == "":
         filtered.pop(0)
