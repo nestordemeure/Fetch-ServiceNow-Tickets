@@ -9,7 +9,7 @@ Running the following will produce a local `/tickets` folder with an `AGENTS.md`
 
 ```sh
 module load python
-python3 build_tickets.py
+python3 format_tickets.py
 ```
 
 See [`ticket_format_specification.md`](./ticket_format_specification.md) for a detailled specification of the ticket's representation.
@@ -18,3 +18,6 @@ See [`ticket_format_specification.md`](./ticket_format_specification.md) for a d
 
 * import tickets directly from servicenow
 * add scron script to refresh tickets regularly
+* remove politness:
+  * starts on a single line with "Hi," or "Hi <name>," or "Dear <name>," or Hello (capital and comma optional)
+  * ends with "Best," or "Regards," or "Cordially," or "Thanks," or "Kind regards," or "Cheers" (capital and comma optionnal) followed with a name on the next line (or a blank then name) or no name
