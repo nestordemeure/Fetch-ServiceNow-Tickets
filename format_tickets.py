@@ -469,8 +469,11 @@ def extract_attachments(data: Dict[str, Any], dest_dir: str) -> List[Dict[str, A
 
 
 def ensure_output_root() -> None:
+    sys.stderr.write("Preparing output folder...\n")
     if os.path.isdir(OUTPUT_ROOT):
+        sys.stderr.write("Deleting existing output folder...\n")
         shutil.rmtree(OUTPUT_ROOT)
+    sys.stderr.write("Creating output folder...\n")
     os.makedirs(OUTPUT_ROOT, exist_ok=True)
 
 
@@ -561,6 +564,7 @@ def main() -> None:
         raise FileNotFoundError(f"Source root not found: {SOURCE_ROOT}")
     ensure_output_root()
 
+    sys.stderr.write("Scanning raw tickets for JSON files...\n")
     paths = list(iter_json_files(SOURCE_ROOT))
     total = len(paths)
     if total == 0:

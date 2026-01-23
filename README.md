@@ -18,4 +18,3 @@ See [`ticket_format_specification.md`](./ticket_format_specification.md) for a d
 
 * import tickets directly from servicenow
 * add scron script to refresh tickets regularly
-* I see a slow loading before the progress bar appears, why?
