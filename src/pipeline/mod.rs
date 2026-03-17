@@ -3,6 +3,7 @@ pub mod dedup;
 pub mod filter;
 pub mod load;
 pub mod normalize;
+pub mod pii;
 pub mod timeline;
 
 use std::path::Path;
@@ -40,7 +41,10 @@ pub fn process_ticket(path: &Path, config: &Config) -> Result<TicketResult, Stri
     // Step 4: Deduplicate
     ticket.messages = dedup::deduplicate(ticket.messages);
 
-    // Step 5: Post-extraction filters
+    // Step 5: PII filtering
+    pii::filter_pii(&mut ticket, &config.pii_filter);
+
+    // Step 6: Post-extraction filters
     if ticket.messages.is_empty() {
         return Ok(TicketResult::Filtered);
     }
@@ -51,7 +55,7 @@ pub fn process_ticket(path: &Path, config: &Config) -> Result<TicketResult, Stri
         return Ok(TicketResult::Filtered);
     }
 
-    // Step 6 & 7: Build timeline and export
+    // Step 7: Build timeline and export
     export::export_ticket(config, &mut ticket)?;
 
     Ok(TicketResult::Processed)

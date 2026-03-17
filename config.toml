@@ -12,3 +12,10 @@ output_format = "markdown"
 #   "update"  - only re-process tickets whose source JSON is newer
 #               than the corresponding output file (or has no output yet).
 mode = "replace"
+
+# PII filtering: redact names, usernames, emails, phone numbers, and passwords
+# from message text, replacing them with placeholders like [NAME], [EMAIL], etc.
+#   "all"   - filter PII from all messages (asker and staff).
+#   "asker" - filter PII only from the original ticket opener's messages.
+#   "none"  - no PII filtering.
+pii_filter = "all"

@@ -20,6 +20,7 @@ src/pipeline/load.rs                     — JSON deserialization into internal 
 src/pipeline/filter.rs                   — ticket-level and message-level filtering rules
 src/pipeline/normalize.rs                — message text cleaning (7-step pipeline)
 src/pipeline/dedup.rs                    — consecutive duplicate message removal
+src/pipeline/pii.rs                      — PII redaction (names, emails, phones, passwords)
 src/pipeline/timeline.rs                 — merge messages + attachments into chronological timeline
 src/pipeline/attachments.rs              — filename sanitization, uniqueness, file copying
 src/export/mod.rs                        — output format dispatch
@@ -44,9 +45,13 @@ When adding or changing features, update **all three** of:
 3. `docs/SPECIFICATIONS.md` (relevant section)
 4. `docs/ticket_format_specification.md` (if normalization or filtering rules change)
 
-## Testing
+## Building and Running
+
+- **Always use `--release`** for `cargo run` and `cargo build`. Debug mode is far too slow for processing thousands of tickets.
+- Use `cargo check` for fast compilation checks (no need for `--release` there).
 
 ```sh
-cargo check          # fast compilation check
-cargo run --release  # run against config.toml input_dir
+cargo check            # fast compilation check
+cargo run --release    # run against config.toml input_dir
+cargo build --release  # build only
 ```

@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::types::{Config, Mode, OutputFormat};
+use crate::types::{Config, Mode, OutputFormat, PiiFilter};
 
 pub fn load_config(path: &str) -> Config {
     let content = match std::fs::read_to_string(path) {
@@ -31,6 +31,7 @@ pub fn load_config(path: &str) -> Config {
     let output_dir = require_str(table, "output_dir", path);
     let output_format_str = require_str(table, "output_format", path);
     let mode_str = require_str(table, "mode", path);
+    let pii_filter_str = require_str(table, "pii_filter", path);
 
     let output_format = match output_format_str.as_str() {
         "markdown" => OutputFormat::Markdown,
@@ -55,6 +56,19 @@ pub fn load_config(path: &str) -> Config {
         }
     };
 
+    let pii_filter = match pii_filter_str.as_str() {
+        "all" => PiiFilter::All,
+        "asker" => PiiFilter::Asker,
+        "none" => PiiFilter::None,
+        other => {
+            eprintln!(
+                "ERROR: {}: invalid pii_filter '{}'. Valid values: \"all\", \"asker\", \"none\"",
+                path, other
+            );
+            std::process::exit(1);
+        }
+    };
+
     let input_path = PathBuf::from(&input_dir);
     if !input_path.is_dir() {
         eprintln!(
@@ -69,6 +83,7 @@ pub fn load_config(path: &str) -> Config {
         output_dir: PathBuf::from(output_dir),
         output_format,
         mode,
+        pii_filter,
     }
 }
 

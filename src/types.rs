@@ -6,6 +6,16 @@ pub struct Config {
     pub output_dir: PathBuf,
     pub output_format: OutputFormat,
     pub mode: Mode,
+    pub pii_filter: PiiFilter,
+}
+
+pub enum PiiFilter {
+    /// Filter PII from all messages.
+    All,
+    /// Filter PII only from the original ticket opener's messages.
+    Asker,
+    /// No PII filtering.
+    None,
 }
 
 pub enum OutputFormat {
@@ -25,6 +35,10 @@ pub struct Ticket {
     pub closed_date: Option<NaiveDate>,
     pub messages: Vec<Message>,
     pub attachments: Vec<Attachment>,
+    /// Names, usernames, and IDs extracted from ticket data for PII filtering.
+    pub known_pii: Vec<String>,
+    /// Author of the first customer-facing message (the original asker).
+    pub opener: Option<String>,
 }
 
 pub struct Message {

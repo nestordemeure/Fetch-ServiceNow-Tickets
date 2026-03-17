@@ -13,6 +13,7 @@ input_dir = "/path/to/servicenow/json/exports"
 output_dir = "./tickets"
 output_format = "markdown"
 mode = "update"
+pii_filter = "all"
 ```
 
 Then build and run:
@@ -49,15 +50,16 @@ All tickets are discovered and processed in parallel using Rayon:
 
 4. **Deduplicate**: remove consecutive messages with identical text and same visibility (internal/customer-facing), keeping the first.
 
-5. **Filter (post-extraction)**: skip the ticket if: zero messages remain, all messages are from bots (`autoticketing`, `pm-node-info-bot`), or exactly one message with no attachments.
+5. **PII filtering** (controlled by `pii_filter`): redact personally identifiable information from message text. Names and usernames (extracted from ticket metadata) are replaced with `[NAME]` via Aho-Corasick dictionary matching. Emails are replaced with `[EMAIL]`, phone numbers with `[PHONE]`, and password values with `[PASSWORD]`. Three modes: `"all"` filters every message, `"asker"` filters only the original ticket opener's messages, `"none"` disables filtering.
 
-6. **Build timeline**: merge messages and attachments into chronological order (sorted by timestamp, messages before attachments at equal timestamps, consecutive attachments grouped). Copy attachment files from `local_path` (resolved relative to `input_dir`), sanitizing filenames for uniqueness.
+6. **Filter (post-extraction)**: skip the ticket if: zero messages remain, all messages are from bots (`autoticketing`, `pm-node-info-bot`), or exactly one message with no attachments.
 
-7. **Export**: render the timeline in the configured output format (currently markdown) and write to `<output_dir>/YYYY/MM/INC########/ticket.md` alongside any attachment files.
+7. **Build timeline**: merge messages and attachments into chronological order (sorted by timestamp, messages before attachments at equal timestamps, consecutive attachments grouped). Copy attachment files from `local_path` (resolved relative to `input_dir`), sanitizing filenames for uniqueness.
+
+8. **Export**: render the timeline in the configured output format (currently markdown) and write to `<output_dir>/YYYY/MM/INC########/ticket.md` alongside any attachment files.
 
 ## TODO
 
 - Add Athos output data format
-- Add PII removal from messages (names, ids, passwords, emails, phone numbers, etc.)
 - Import tickets directly from the ServiceNow API
   - Add scron script to refresh tickets regularly

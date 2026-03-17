@@ -21,6 +21,12 @@ output_format = "markdown"
 #   "update"  - only re-process tickets whose source JSON is newer
 #               than the corresponding output file (or has no output yet).
 mode = "update"
+
+# PII filtering:
+#   "all"   - filter PII from all messages (staff and asker).
+#   "asker" - filter PII only from the original ticket opener's messages.
+#   "none"  - no PII filtering.
+pii_filter = "all"
 ```
 
 All fields are **required**. If any field is missing, the program exits with an error message naming the missing field and listing the valid values (e.g. `output_format` accepts `"markdown"`, `mode` accepts `"update"` or `"replace"`).
@@ -38,6 +44,7 @@ src/
     filter.rs          - ticket-level and message-level filtering rules
     normalize.rs       - message text cleaning (metadata, greetings, footers, signoffs, etc.)
     dedup.rs           - consecutive duplicate message removal
+    pii.rs             - PII redaction (names, emails, phones, passwords)
     timeline.rs        - merge messages and attachments into a sorted timeline
     attachments.rs     - attachment extraction, filename sanitization, binary writing
   export/
@@ -100,6 +107,8 @@ Ticket {
   closed_date: Option<NaiveDate>,
   messages: Vec<Message>,
   attachments: Vec<Attachment>,
+  known_pii: Vec<String>,       // names, usernames extracted from ticket metadata
+  opener: Option<String>,       // author of the first customer-facing message
 }
 
 Message {
@@ -187,7 +196,33 @@ Two consecutive messages are duplicates if:
 
 Keep only the first occurrence.
 
-### 4.5 Timeline (`pipeline/timeline.rs`)
+### 4.5 PII Filtering (`pipeline/pii.rs`)
+
+Controlled by the `pii_filter` config field. Applied after normalization and deduplication.
+
+- `"all"`: redact PII in every message.
+- `"asker"`: redact PII only in messages authored by the ticket opener (the first customer-facing message author). Staff messages are left untouched.
+- `"none"`: skip PII filtering entirely.
+
+#### 4.5.1 PII Extraction (at load time)
+
+At load time, names, usernames, and name parts are extracted from ticket metadata into a `known_pii` list:
+- Raw `created_by` fields from all messages (both customer-facing and internal work notes). Parenthesized usernames like `(ebasheer)` are extracted.
+- `incident_fields.caller_id`, `opened_by`, `closed_by`, `resolved_by` — parsed for names (handling `"Last, First (username)"` format) and usernames.
+- `incident_fields.sys_created_by` — plain username.
+- Individual name parts (first name, last name) are added alongside full names.
+
+The opener is identified as the author of the first customer-facing (non-internal) message.
+
+#### 4.5.2 Redaction
+
+Redaction is applied in order:
+1. **Passwords**: regex matching `password:`, `passwd=`, `passcode:`, `pin:`, `secret:` followed by a value. The label is preserved, the value is replaced with `[PASSWORD]`.
+2. **Emails**: standard email pattern, replaced with `[EMAIL]`.
+3. **Phone numbers**: conservative pattern requiring country codes, parenthesized area codes, or explicit 3-3-4 digit grouping with separators. Avoids matching dates or node IDs. Replaced with `[PHONE]`.
+4. **Names**: Aho-Corasick case-insensitive dictionary match against the ticket's `known_pii` list. All matches replaced with `[NAME]`.
+
+### 4.6 Timeline (`pipeline/timeline.rs`)
 
 Merge messages and attachments into a single chronological timeline.
 
@@ -195,17 +230,17 @@ Messages in the input JSON are in reverse chronological order (newest first) wit
 
 Consecutive attachment entries are merged into a single `AttachmentGroup`.
 
-### 4.6 Attachments (`pipeline/attachments.rs`)
+### 4.7 Attachments (`pipeline/attachments.rs`)
 
 - **Sanitize filename**: replace `/` and `\` with `_`, remove non-alphanumeric characters (except `.`, `_`, `-`, space), strip leading/trailing spaces and dots, fall back to `"attachment"` if empty.
 - **Ensure uniqueness**: append `_2`, `_3`, etc. on collision. Reserved filenames (e.g. `ticket.md` for the markdown format) are defined by the exporter.
 - **Write to disk**: copy the file from `local_path` (resolved relative to `input_dir`) into the ticket's output directory. Hard error if the source file does not exist.
 
-### 4.7 Export (`export/`)
+### 4.8 Export (`export/`)
 
 The export module dispatches on `output_format` from the config. Each format controls its own output directory layout, file naming, and rendering. The pipeline provides a processed `Ticket` with a built timeline; the exporter decides how to write it.
 
-#### 4.7.1 Markdown (`export/markdown.rs`)
+#### 4.8.1 Markdown (`export/markdown.rs`)
 
 The markdown output format (directory layout, `ticket.md` structure, heading rules, attachment listing) is fully specified in [`ticket_format_specification.md`](./ticket_format_specification.md). The export module implements that specification exactly.
 
@@ -245,7 +280,8 @@ The input is trusted and well-formed. Errors indicate data problems that must be
 | `toml` | Config file parsing |
 | `rayon` | Parallel iteration |
 | `chrono` | Date/time parsing and comparison |
-| `regex` | Pattern matching for normalization and filtering |
+| `regex` | Pattern matching for normalization, filtering, and PII redaction |
+| `aho-corasick` | Multi-pattern dictionary matching for PII name redaction |
 
 No logging framework — if something goes wrong, print the error to stderr and crash. Summary stats go to stdout at the end of the run.
 
@@ -254,5 +290,4 @@ No logging framework — if something goes wrong, print the error to stderr and 
 These are **not** part of the initial implementation but are planned:
 
 - **Athos output format**: an additional export format for the Athos system (to be specified later).
-- **PII removal**: a normalization step that strips personally identifiable information from message text (names, emails, phone numbers, etc.). Will be inserted into the pipeline between normalization and deduplication.
 - **Direct ServiceNow API integration**: fetch tickets directly from the ServiceNow API instead of reading from pre-exported JSON files.

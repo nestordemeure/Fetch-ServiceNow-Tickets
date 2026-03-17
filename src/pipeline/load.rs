@@ -66,6 +66,16 @@ pub fn load_ticket(path: &Path, input_root: &Path) -> Result<Ticket, String> {
         }
     }
 
+    // Extract PII terms from ticket data
+    let mut known_pii = Vec::new();
+    collect_pii_terms(&data, &messages, &mut known_pii);
+
+    // Identify opener: first customer-facing (non-internal) message author
+    let opener = messages
+        .iter()
+        .find(|m| !m.internal)
+        .map(|m| m.author.clone());
+
     Ok(Ticket {
         incident_number,
         short_description,
@@ -74,6 +84,8 @@ pub fn load_ticket(path: &Path, input_root: &Path) -> Result<Ticket, String> {
         closed_date,
         messages,
         attachments,
+        known_pii,
+        opener,
     })
 }
 
@@ -206,4 +218,95 @@ fn parse_date(s: &str) -> Result<NaiveDate, String> {
     };
     NaiveDate::parse_from_str(date_part, "%Y-%m-%d")
         .map_err(|e| format!("cannot parse date: {}", e))
+}
+
+/// Extract names, usernames, and name parts from ticket data for PII dictionary matching.
+///
+/// Sources:
+///   - message `created_by` fields (e.g. "First Last (username) (Staff work notes ...)")
+///   - `incident_fields.caller_id` (e.g. "Last, First (username)")
+///   - `incident_fields.opened_by` (e.g. "Last, First (username)")
+///   - `incident_fields.sys_created_by` (plain username)
+fn collect_pii_terms(data: &Value, messages: &[Message], out: &mut Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+
+    let mut add = |term: &str| {
+        let t = term.trim().to_string();
+        // Minimum 3 characters to avoid short tokens matching inside common words
+        if t.len() >= 3 && seen.insert(t.to_lowercase()) {
+            out.push(t);
+        }
+    };
+
+    // From message authors (already normalized, but we also want the raw created_by for usernames)
+    for msg in messages {
+        add(&msg.author);
+        // Individual name parts (first, last)
+        for part in msg.author.split_whitespace() {
+            add(part);
+        }
+    }
+
+    // From incident_fields: caller_id, opened_by, sys_created_by
+    let fields = &data["incident_fields"];
+    for key in &["caller_id", "opened_by", "closed_by", "resolved_by"] {
+        if let Some(raw) = fields[*key].as_str() {
+            extract_name_and_username(raw, &mut add);
+        }
+    }
+    if let Some(username) = fields["sys_created_by"].as_str() {
+        add(username);
+    }
+
+    // From raw created_by in discussions (to capture usernames in parentheses)
+    for section in &["customer_facing_comments", "internal_work_notes"] {
+        if let Some(msgs) = data["discussions"][*section].as_array() {
+            for msg in msgs {
+                if let Some(raw) = msg["created_by"].as_str() {
+                    extract_name_and_username(raw, &mut add);
+                }
+            }
+        }
+    }
+}
+
+/// Parse a name field like "Last, First (username)" or "First Last (username) (suffix)"
+/// and call `add` for the full name, individual parts, and username.
+fn extract_name_and_username(raw: &str, add: &mut impl FnMut(&str)) {
+    if raw.is_empty() || raw == "System" {
+        return;
+    }
+
+    // Extract username from first parenthesized group
+    if let Some(paren_start) = raw.find('(') {
+        let name_part = raw[..paren_start].trim();
+        if !name_part.is_empty() {
+            // Full name (with possible "Last, First" format)
+            add(name_part);
+            // Also add normalized "First Last" if comma-separated
+            if let Some((last, first)) = name_part.split_once(',') {
+                let first = first.trim();
+                let last = last.trim();
+                add(&format!("{} {}", first, last));
+                add(first);
+                add(last);
+            } else {
+                for part in name_part.split_whitespace() {
+                    add(part);
+                }
+            }
+        }
+
+        // Username in parentheses
+        if let Some(paren_end) = raw[paren_start..].find(')') {
+            let username = &raw[paren_start + 1..paren_start + paren_end];
+            add(username);
+        }
+    } else {
+        // No parentheses - just a name or username
+        add(raw);
+        for part in raw.split_whitespace() {
+            add(part);
+        }
+    }
 }
