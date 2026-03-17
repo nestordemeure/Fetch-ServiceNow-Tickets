@@ -142,7 +142,8 @@ Skip the entire ticket if any of these match `short_description`:
 1. **Iris PI request**: exact match (case-insensitive) `"Ticket from Iris: New PI Account Request"`.
 2. **Storage quota increase**: prefix match (case-insensitive) `"Storage Quota Increase request:"`.
 3. **Training renewal**: regex match (case-insensitive) `^Renewal of .+ Training for Staff$`.
-4. **Account activation**: substring match (case-insensitive) containing `"NERSC Account activation"`.
+4. **Training expiring**: substring match (case-insensitive) containing `"Training expiring"`.
+5. **Account activation**: substring match (case-insensitive) containing `"NERSC Account activation"`.
 
 #### 4.2.2 Message-Level Filters
 

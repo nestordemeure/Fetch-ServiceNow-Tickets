@@ -97,6 +97,7 @@ Rules:
 - Skip tickets whose `short_description` is exactly `Ticket from Iris: New PI Account Request`.
 - Skip tickets whose `short_description` starts with `Storage Quota Increase request:`.
 - Skip tickets whose `short_description` matches `Renewal of <training-name> Training for Staff`.
+- Skip tickets whose `short_description` includes `Training expiring`.
 - Skip tickets whose `short_description` includes `NERSC Account activation`.
 - Skip tickets with zero messages.
 - Skip tickets with exactly one message and no attachments.

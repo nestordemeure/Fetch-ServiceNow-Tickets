@@ -14,6 +14,7 @@ pub fn should_skip_ticket(short_description: &Option<String>) -> bool {
     is_iris_pi_request(desc)
         || is_storage_quota_increase(desc)
         || is_training_renewal(desc)
+        || is_training_expiring(desc)
         || is_nersc_account_activation(desc)
 }
 
@@ -44,6 +45,11 @@ fn is_training_renewal(desc: &str) -> bool {
         Regex::new(r"(?i)^Renewal of .+ Training for Staff$").unwrap()
     });
     re.is_match(desc)
+}
+
+// Substring match (case-insensitive): contains "Training expiring"
+fn is_training_expiring(desc: &str) -> bool {
+    desc.to_ascii_lowercase().contains("training expiring")
 }
 
 // Substring match (case-insensitive): contains "NERSC Account activation"

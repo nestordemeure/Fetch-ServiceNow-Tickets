@@ -34,6 +34,7 @@ All tickets are discovered and processed in parallel using Rayon:
    - Exact match: `"Ticket from Iris: New PI Account Request"`.
    - Prefix: `"Storage Quota Increase request:"`.
    - Regex: `^Renewal of .+ Training for Staff$`.
+   - Substring: `"Training expiring"`.
    - Substring: `"NERSC Account activation"`.
 
 3. **Extract and normalize messages**: pull messages from `customer_facing_comments` and `internal_work_notes`. Skip messages authored by `"System"`. Strip the `(staff work notes (NERSC private))` suffix from internal author names. Clean each message's text in order:
