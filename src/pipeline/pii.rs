@@ -1,9 +1,15 @@
 use std::sync::OnceLock;
 
 use aho_corasick::AhoCorasick;
+use hmac::{Hmac, Mac};
 use regex::Regex;
+use sha2::Sha256;
 
 use crate::types::{PiiFilter, Ticket};
+
+/// Fixed salt for deterministic HMAC pseudonymization.
+/// Not for security — just for consistency across runs.
+const HMAC_SALT: &[u8] = b"nersc-ticket-processor-v1";
 
 /// Apply PII filtering to a ticket's messages.
 ///
@@ -11,7 +17,7 @@ use crate::types::{PiiFilter, Ticket};
 ///   - `All`:   filter all messages.
 ///   - `Asker`: filter only messages from the ticket opener (non-staff).
 ///   - `None`:  no-op.
-pub fn filter_pii(ticket: &mut Ticket, pii_filter: &PiiFilter) {
+pub fn filter_pii(ticket: &mut Ticket, pii_filter: &PiiFilter, deterministic: bool) {
     if matches!(pii_filter, PiiFilter::None) {
         return;
     }
@@ -37,18 +43,30 @@ pub fn filter_pii(ticket: &mut Ticket, pii_filter: &PiiFilter) {
         };
 
         if should_filter {
-            msg.text = redact_text(&msg.text, &name_matcher);
+            msg.text = redact_text(&msg.text, &name_matcher, deterministic);
         }
     }
 }
 
 /// Redact PII from a single text string.
-/// Applied in order: passwords, emails, phones, then names.
-fn redact_text(text: &str, name_matcher: &Option<AhoCorasick>) -> String {
+/// Applied in order: passwords, emails, username-in-context patterns, phones, then names.
+fn redact_text(text: &str, name_matcher: &Option<AhoCorasick>, deterministic: bool) -> String {
     let text = redact_passwords(text);
-    let text = redact_emails(&text);
+    let text = redact_emails(&text, deterministic);
+    let text = redact_username_contexts(&text, deterministic);
     let text = redact_phones(&text);
-    redact_names(&text, name_matcher)
+    redact_names(&text, name_matcher, deterministic)
+}
+
+// ── Deterministic hashing ─────────────────────────────────────────────────
+
+fn hmac_tag(input: &str) -> String {
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(HMAC_SALT).expect("HMAC accepts any key length");
+    mac.update(input.to_lowercase().as_bytes());
+    let result = mac.finalize().into_bytes();
+    // Take first 5 bytes = 10 hex chars
+    hex::encode_upper(&result[..5])
 }
 
 // ── Emails ──────────────────────────────────────────────────────────────────
@@ -60,8 +78,16 @@ fn email_regex() -> &'static Regex {
     })
 }
 
-fn redact_emails(text: &str) -> String {
-    email_regex().replace_all(text, "[EMAIL]").into_owned()
+fn redact_emails(text: &str, deterministic: bool) -> String {
+    if deterministic {
+        email_regex()
+            .replace_all(text, |caps: &regex::Captures| {
+                format!("EMAIL_{}", hmac_tag(&caps[0]))
+            })
+            .into_owned()
+    } else {
+        email_regex().replace_all(text, "[EMAIL]").into_owned()
+    }
 }
 
 // ── Phone numbers ───────────────────────────────────────────────────────────
@@ -107,6 +133,91 @@ fn redact_passwords(text: &str) -> String {
         .into_owned()
 }
 
+// ── Username-in-context patterns ────────────────────────────────────────────
+// Detect usernames embedded in shell logins, NERSC paths, and command flags.
+
+fn shell_login_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    // username@hostname-like (e.g. jsmith@perlmutter, user123@cori.nersc.gov)
+    RE.get_or_init(|| {
+        Regex::new(r"([a-zA-Z][a-zA-Z0-9_]{1,31})@([a-zA-Z][a-zA-Z0-9.\-]+)").unwrap()
+    })
+}
+
+fn nersc_home_path_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    // /global/homes/u/username, /pscratch/sd/u/username, /global/cfs/cdirs/project/username
+    RE.get_or_init(|| {
+        Regex::new(concat!(
+            r"(?:",
+            r"/global/homes/[a-z]/([a-zA-Z][a-zA-Z0-9_]{1,31})",
+            r"|",
+            r"/pscratch/sd/[a-z]/([a-zA-Z][a-zA-Z0-9_]{1,31})",
+            r"|",
+            r"/global/cfs/cdirs/[a-zA-Z0-9_.\-]+/([a-zA-Z][a-zA-Z0-9_]{1,31})",
+            r")",
+        ))
+        .unwrap()
+    })
+}
+
+fn command_user_flag_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    // -u username or --user username (space-separated)
+    RE.get_or_init(|| {
+        Regex::new(r"(?:--user\s+|-u\s+)([a-zA-Z][a-zA-Z0-9_]{1,31})\b").unwrap()
+    })
+}
+
+fn redact_username_contexts(text: &str, deterministic: bool) -> String {
+    let placeholder = |username: &str| -> String {
+        if deterministic {
+            format!("USER_{}", hmac_tag(username))
+        } else {
+            "[NAME]".to_string()
+        }
+    };
+
+    // Shell login: user@host → [NAME]@host or USER_HASH@host
+    let text = shell_login_regex()
+        .replace_all(text, |caps: &regex::Captures| {
+            let user = &caps[1];
+            let host = &caps[2];
+            format!("{}@{}", placeholder(user), host)
+        })
+        .into_owned();
+
+    // NERSC home paths: replace the username portion
+    let text = nersc_home_path_regex()
+        .replace_all(&text, |caps: &regex::Captures| {
+            let full = &caps[0];
+            // One of the 3 capture groups will have the username
+            let username = caps
+                .get(1)
+                .or_else(|| caps.get(2))
+                .or_else(|| caps.get(3))
+                .unwrap()
+                .as_str();
+            let p = placeholder(username);
+            let prefix_end = full.len() - username.len();
+            format!("{}{}", &full[..prefix_end], p)
+        })
+        .into_owned();
+
+    // Command user flags: -u username or --user username
+    let text = command_user_flag_regex()
+        .replace_all(&text, |caps: &regex::Captures| {
+            let full = &caps[0];
+            let username = &caps[1];
+            let p = placeholder(username);
+            let prefix_end = full.len() - username.len();
+            format!("{}{}", &full[..prefix_end], p)
+        })
+        .into_owned();
+
+    text
+}
+
 // ── Names (dictionary-based) ────────────────────────────────────────────────
 
 /// Check if a byte position is at a word boundary (not adjacent to an alphanumeric char).
@@ -120,7 +231,7 @@ fn is_word_boundary(text: &str, pos: usize) -> bool {
     !bytes[pos].is_ascii_alphanumeric()
 }
 
-fn redact_names(text: &str, matcher: &Option<AhoCorasick>) -> String {
+fn redact_names(text: &str, matcher: &Option<AhoCorasick>, deterministic: bool) -> String {
     let ac = match matcher {
         Some(ac) => ac,
         None => return text.to_string(),
@@ -136,7 +247,12 @@ fn redact_names(text: &str, matcher: &Option<AhoCorasick>) -> String {
         // Only replace if the match is at word boundaries on both sides
         if is_word_boundary(text, start) && is_word_boundary(text, end) {
             result.push_str(&text[last_end..start]);
-            result.push_str("[NAME]");
+            if deterministic {
+                let matched = &text[start..end];
+                result.push_str(&format!("USER_{}", hmac_tag(matched)));
+            } else {
+                result.push_str("[NAME]");
+            }
             last_end = end;
         }
     }

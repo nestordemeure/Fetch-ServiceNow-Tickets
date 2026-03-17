@@ -27,9 +27,22 @@ mode = "update"
 #   "asker" - filter PII only from the original ticket opener's messages.
 #   "none"  - no PII filtering.
 pii_filter = "all"
+
+# When true, PII replacements use deterministic HMAC-based aliases
+# (e.g. USER_A3F2B1C9D0, EMAIL_B4E8C2A1F7) instead of generic placeholders.
+# Same input always produces the same alias, preserving identity linkage.
+deterministic_pii = false
+
+[filter]
+min_created_date = ""
+exclude_contact_types = ["Staff Initiated", "System Alert Auto Generated"]
+include_close_codes = []
+require_closed_or_resolved = false
+exclude_created_by = ""
+exclude_assignment_group = ""
 ```
 
-All fields are **required**. If any field is missing, the program exits with an error message naming the missing field and listing the valid values (e.g. `output_format` accepts `"markdown"`, `mode` accepts `"update"` or `"replace"`).
+All fields are **required** (including all fields in the `[filter]` section). If any field is missing, the program exits with an error message naming the missing field and listing the valid values (e.g. `output_format` accepts `"markdown"`, `mode` accepts `"update"` or `"replace"`). Empty strings and empty arrays are valid values for filter fields that should have no effect.
 
 ## 2. Project Structure
 
@@ -92,7 +105,7 @@ Each JSON file represents one incident and has this shape:
 Expected keys per context:
 - **Messages**: `timestamp`, `created_by`, `text` — plain strings.
 - **Attachments**: fields are wrapped in `{"display_value": "...", "value": "..."}` objects. Use the `value` field. Expected keys: `file_name`, `sys_created_on` (for timestamp). Content is loaded from `local_path` (a path relative to the input root directory). The attachment has no inline base64 — files are always on disk.
-- **Incident fields**: `number`, `state`, `opened_at`, `short_description` — plain strings. `closed_at` is optional (ticket may still be open).
+- **Incident fields**: `number`, `state`, `opened_at`, `short_description` — plain strings. `closed_at`, `contact_type`, `close_code`, `sys_created_by`, `assignment_group` are optional (used for configurable filtering).
 
 ### 3.2 Internal Types
 
@@ -105,6 +118,10 @@ Ticket {
   status: String,
   opened_date: NaiveDate,
   closed_date: Option<NaiveDate>,
+  contact_type: Option<String>,
+  close_code: Option<String>,
+  created_by: Option<String>,        // sys_created_by
+  assignment_group: Option<String>,
   messages: Vec<Message>,
   attachments: Vec<Attachment>,
   known_pii: Vec<String>,       // names, usernames extracted from ticket metadata
@@ -145,7 +162,18 @@ Each ticket JSON file goes through the following stages in order. The pipeline i
 
 ### 4.2 Filter (`pipeline/filter.rs`)
 
-#### 4.2.1 Ticket-Level Filters
+#### 4.2.1 Config-Based Filters
+
+Skip the ticket based on configurable rules in the `[filter]` config section. Checked in order:
+
+1. **`min_created_date`**: skip if `ticket.opened_date` is before this date. Empty string = no filter.
+2. **`exclude_contact_types`**: skip if the ticket's `contact_type` (case-insensitive) matches any entry. Common values: `"Staff Initiated"`, `"System Alert Auto Generated"`.
+3. **`include_close_codes`**: if non-empty, skip if the ticket's `close_code` is NOT in the set. Empty array = accept all.
+4. **`require_closed_or_resolved`**: skip if the ticket's `state` (case-insensitive) is not `"Closed"` or `"Resolved"`.
+5. **`exclude_created_by`**: skip if the ticket's `sys_created_by` matches this regex. Empty string = no filter.
+6. **`exclude_assignment_group`**: skip if the ticket's `assignment_group` matches this regex. Empty string = no filter.
+
+#### 4.2.2 Short-Description Filters
 
 Skip the entire ticket if any of these match `short_description`:
 1. **Iris PI request**: exact match (case-insensitive) `"Ticket from Iris: New PI Account Request"`.
@@ -154,16 +182,16 @@ Skip the entire ticket if any of these match `short_description`:
 4. **Training expiring**: substring match (case-insensitive) containing `"Training expiring"`.
 5. **Account activation**: substring match (case-insensitive) containing `"NERSC Account activation"`.
 
-#### 4.2.2 Message-Level Filters
+#### 4.2.3 Message-Level Filters
 
 - Skip messages whose author is `"System"`.
 - Skip messages whose text is empty after normalization.
 
-#### 4.2.3 Post-Extraction Filters
+#### 4.2.4 Post-Extraction Filters
 
 After messages are extracted, cleaned, and deduplicated:
 - Skip the ticket if zero messages remain.
-- Skip the ticket if all remaining messages are authored exclusively by `"autoticketing"` and/or `"pm-node-info-bot"`.
+- Skip the ticket if all remaining messages are authored exclusively by `"autoticketing"`, `"pm-node-info-bot"`, and/or `"system"` (case-insensitive).
 - Skip the ticket if exactly one message remains and there are no attachments.
 
 ### 4.3 Normalize (`pipeline/normalize.rs`)
@@ -218,9 +246,23 @@ The opener is identified as the author of the first customer-facing (non-interna
 
 Redaction is applied in order:
 1. **Passwords**: regex matching `password:`, `passwd=`, `passcode:`, `pin:`, `secret:` followed by a value. The label is preserved, the value is replaced with `[PASSWORD]`.
-2. **Emails**: standard email pattern, replaced with `[EMAIL]`.
-3. **Phone numbers**: conservative pattern requiring country codes, parenthesized area codes, or explicit 3-3-4 digit grouping with separators. Avoids matching dates or node IDs. Replaced with `[PHONE]`.
-4. **Names**: Aho-Corasick case-insensitive dictionary match against the ticket's `known_pii` list. All matches replaced with `[NAME]`.
+2. **Emails**: standard email pattern, replaced with `[EMAIL]` (or `EMAIL_<HMAC>` in deterministic mode).
+3. **Username-in-context patterns**: detect usernames embedded in common NERSC contexts:
+   - **Shell logins**: `username@hostname` (e.g. `jsmith@perlmutter`) — replace the username portion.
+   - **NERSC home paths**: `/global/homes/u/username`, `/pscratch/sd/u/username`, `/global/cfs/cdirs/project/username` — replace the username portion.
+   - **Command user flags**: `-u username` or `--user username` — replace the username portion.
+4. **Phone numbers**: conservative pattern requiring country codes, parenthesized area codes, or explicit 3-3-4 digit grouping with separators. Avoids matching dates or node IDs. Replaced with `[PHONE]`.
+5. **Names**: Aho-Corasick case-insensitive dictionary match against the ticket's `known_pii` list. All matches replaced with `[NAME]` (or `USER_<HMAC>` in deterministic mode).
+
+#### 4.5.3 Deterministic Pseudonymization
+
+When `deterministic_pii = true`, names and emails are replaced with HMAC-SHA256-based pseudonyms instead of generic placeholders:
+- Names → `USER_<10-hex-chars>` (e.g. `USER_A3F2B1C9D0`)
+- Emails → `EMAIL_<10-hex-chars>` (e.g. `EMAIL_B4E8C2A1F7`)
+- Passwords → `[PASSWORD]` (always generic, no identity to link)
+- Phones → `[PHONE]` (always generic, no identity to link)
+
+The HMAC uses a fixed salt (`nersc-ticket-processor-v1`) for consistency across runs. The same input always produces the same alias, preserving identity linkage across tickets while still masking the actual PII. The input is lowercased before hashing for case-insensitive consistency.
 
 ### 4.6 Timeline (`pipeline/timeline.rs`)
 
@@ -282,6 +324,9 @@ The input is trusted and well-formed. Errors indicate data problems that must be
 | `chrono` | Date/time parsing and comparison |
 | `regex` | Pattern matching for normalization, filtering, and PII redaction |
 | `aho-corasick` | Multi-pattern dictionary matching for PII name redaction |
+| `hmac` | HMAC-SHA256 for deterministic PII pseudonymization |
+| `sha2` | SHA-256 hash function (used by `hmac`) |
+| `hex` | Hex encoding for HMAC output |
 
 No logging framework — if something goes wrong, print the error to stderr and crash. Summary stats go to stdout at the end of the run.
 

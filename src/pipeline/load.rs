@@ -18,6 +18,10 @@ pub fn load_ticket(path: &Path, input_root: &Path) -> Result<Ticket, String> {
     let short_description = optional_json_str(&data, &["incident_fields", "short_description"]);
     let opened_at_str = require_json_str(&data, &["incident_fields", "opened_at"], path)?;
     let closed_at_str = optional_json_str(&data, &["incident_fields", "closed_at"]);
+    let contact_type = optional_json_str(&data, &["incident_fields", "contact_type"]);
+    let close_code = optional_json_str(&data, &["incident_fields", "close_code"]);
+    let created_by = optional_json_str(&data, &["incident_fields", "sys_created_by"]);
+    let assignment_group = optional_json_str(&data, &["incident_fields", "assignment_group"]);
 
     let opened_date = parse_date(&opened_at_str)
         .map_err(|e| format!("{}: opened_at '{}': {}", path.display(), opened_at_str, e))?;
@@ -82,6 +86,10 @@ pub fn load_ticket(path: &Path, input_root: &Path) -> Result<Ticket, String> {
         status,
         opened_date,
         closed_date,
+        contact_type,
+        close_code,
+        created_by,
+        assignment_group,
         messages,
         attachments,
         known_pii,

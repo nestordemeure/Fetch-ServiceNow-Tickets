@@ -19,3 +19,35 @@ mode = "replace"
 #   "asker" - filter PII only from the original ticket opener's messages.
 #   "none"  - no PII filtering.
 pii_filter = "all"
+
+# When true, PII replacements use deterministic HMAC-based aliases (e.g. USER_A3F2B1C9D0)
+# instead of generic placeholders like [NAME], [EMAIL]. Same input always produces
+# the same alias, preserving identity linkage across tickets.
+# Requires pii_filter to be "all" or "asker" to have any effect.
+deterministic_pii = false
+
+[filter]
+# Exclude tickets created before this date (YYYY-MM-DD).
+# Leave empty string to include all dates.
+min_created_date = ""
+
+# Exclude tickets with these contact types (case-insensitive).
+# Common values: "Staff Initiated", "System Alert Auto Generated",
+#                "Email", "User Web Interface", "Phone", "In Person"
+exclude_contact_types = ["Staff Initiated", "System Alert Auto Generated"]
+
+# Only keep tickets with these close codes.
+# Leave empty to accept all close codes.
+# Common values: "Solved (Permanently)", "Resolved by Requester", "Resolved by Support"
+include_close_codes = []
+
+# Only keep tickets whose state is "Closed" or "Resolved".
+require_closed_or_resolved = false
+
+# Exclude tickets whose creator (sys_created_by) matches this regex.
+# Leave empty string for no exclusion.
+exclude_created_by = ""
+
+# Exclude tickets whose assignment group matches this regex.
+# Leave empty string for no exclusion.
+exclude_assignment_group = ""

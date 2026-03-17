@@ -25,7 +25,12 @@ pub fn process_ticket(path: &Path, config: &Config) -> Result<TicketResult, Stri
     // Step 1: Load
     let mut ticket = load::load_ticket(path, &config.input_dir)?;
 
-    // Step 2: Ticket-level filter
+    // Step 2a: Config-based filters (date, contact type, close code, state, creator, assignment group)
+    if filter::should_skip_by_config(&ticket, &config.filter) {
+        return Ok(TicketResult::Filtered);
+    }
+
+    // Step 2b: Ticket-level filter (short_description patterns)
     if filter::should_skip_ticket(&ticket.short_description) {
         return Ok(TicketResult::Filtered);
     }
@@ -42,7 +47,7 @@ pub fn process_ticket(path: &Path, config: &Config) -> Result<TicketResult, Stri
     ticket.messages = dedup::deduplicate(ticket.messages);
 
     // Step 5: PII filtering
-    pii::filter_pii(&mut ticket, &config.pii_filter);
+    pii::filter_pii(&mut ticket, &config.pii_filter, config.deterministic_pii);
 
     // Step 6: Post-extraction filters
     if ticket.messages.is_empty() {

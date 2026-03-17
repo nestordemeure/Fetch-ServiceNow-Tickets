@@ -1,4 +1,5 @@
 use chrono::{NaiveDate, NaiveDateTime};
+use regex::Regex;
 use std::path::PathBuf;
 
 pub struct Config {
@@ -7,6 +8,17 @@ pub struct Config {
     pub output_format: OutputFormat,
     pub mode: Mode,
     pub pii_filter: PiiFilter,
+    pub deterministic_pii: bool,
+    pub filter: FilterConfig,
+}
+
+pub struct FilterConfig {
+    pub min_created_date: Option<NaiveDate>,
+    pub exclude_contact_types: Vec<String>, // lowercased at parse time
+    pub include_close_codes: Vec<String>,
+    pub require_closed_or_resolved: bool,
+    pub exclude_created_by: Option<Regex>,
+    pub exclude_assignment_group: Option<Regex>,
 }
 
 pub enum PiiFilter {
@@ -33,6 +45,10 @@ pub struct Ticket {
     pub status: String,
     pub opened_date: NaiveDate,
     pub closed_date: Option<NaiveDate>,
+    pub contact_type: Option<String>,
+    pub close_code: Option<String>,
+    pub created_by: Option<String>,
+    pub assignment_group: Option<String>,
     pub messages: Vec<Message>,
     pub attachments: Vec<Attachment>,
     /// Names, usernames, and IDs extracted from ticket data for PII filtering.
