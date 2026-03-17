@@ -3,9 +3,9 @@ use std::path::Path;
 use chrono::{NaiveDate, NaiveDateTime};
 use serde_json::Value;
 
-use crate::types::{Attachment, Message, Ticket};
+use crate::types::{Attachment, Message, OutputFormat, Ticket};
 
-pub fn load_ticket(path: &Path, input_root: &Path) -> Result<Ticket, String> {
+pub fn load_ticket(path: &Path, input_root: &Path, output_format: &OutputFormat) -> Result<Ticket, String> {
     let content =
         std::fs::read_to_string(path).map_err(|e| format!("{}: read error: {}", path.display(), e))?;
 
@@ -35,11 +35,16 @@ pub fn load_ticket(path: &Path, input_root: &Path) -> Result<Ticket, String> {
     let discussions = &data["discussions"];
     let mut messages = Vec::new();
 
+    let preserve_json = matches!(output_format, OutputFormat::Json);
+
     // Customer-facing comments (reverse chronological in JSON -> reverse to get chronological)
     if let Some(comments) = discussions["customer_facing_comments"].as_array() {
         for (i, msg) in comments.iter().enumerate() {
             let ctx = format!("{}:customer_facing_comments[{}]", path.display(), i);
-            if let Some(m) = parse_message(msg, false, &ctx)? {
+            if let Some(mut m) = parse_message(msg, false, &ctx)? {
+                if preserve_json {
+                    m.source_index = Some(i);
+                }
                 messages.push(m);
             }
         }
@@ -54,7 +59,10 @@ pub fn load_ticket(path: &Path, input_root: &Path) -> Result<Ticket, String> {
     if let Some(notes) = discussions["internal_work_notes"].as_array() {
         for (i, msg) in notes.iter().enumerate() {
             let ctx = format!("{}:internal_work_notes[{}]", path.display(), i);
-            if let Some(m) = parse_message(msg, true, &ctx)? {
+            if let Some(mut m) = parse_message(msg, true, &ctx)? {
+                if preserve_json {
+                    m.source_index = Some(i);
+                }
                 messages.push(m);
             }
         }
@@ -80,6 +88,8 @@ pub fn load_ticket(path: &Path, input_root: &Path) -> Result<Ticket, String> {
         .find(|m| !m.internal)
         .map(|m| m.author.clone());
 
+    let raw_json = if preserve_json { Some(data) } else { None };
+
     Ok(Ticket {
         incident_number,
         short_description,
@@ -94,6 +104,7 @@ pub fn load_ticket(path: &Path, input_root: &Path) -> Result<Ticket, String> {
         attachments,
         known_pii,
         opener,
+        raw_json,
     })
 }
 
@@ -139,6 +150,7 @@ fn parse_message(msg: &Value, internal: bool, ctx: &str) -> Result<Option<Messag
         timestamp,
         text: text.to_string(),
         internal,
+        source_index: None,
     }))
 }
 

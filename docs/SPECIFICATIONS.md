@@ -13,7 +13,7 @@ input_dir = "/home/nestor/Documents/work/NERSC/tickets/demo_ticket_stash/pengfei
 # Path to the directory where processed tickets are written.
 output_dir = "./tickets"
 
-# Output format. Currently only "markdown" is supported.
+# Output format: "markdown" or "json".
 output_format = "markdown"
 
 # Update mode:
@@ -42,7 +42,7 @@ exclude_created_by = ""
 exclude_assignment_group = ""
 ```
 
-All fields are **required** (including all fields in the `[filter]` section). If any field is missing, the program exits with an error message naming the missing field and listing the valid values (e.g. `output_format` accepts `"markdown"`, `mode` accepts `"update"` or `"replace"`). Empty strings and empty arrays are valid values for filter fields that should have no effect.
+All fields are **required** (including all fields in the `[filter]` section). If any field is missing, the program exits with an error message naming the missing field and listing the valid values (e.g. `output_format` accepts `"markdown"` or `"json"`, `mode` accepts `"update"` or `"replace"`). Empty strings and empty arrays are valid values for filter fields that should have no effect.
 
 ## 2. Project Structure
 
@@ -58,11 +58,13 @@ src/
     normalize.rs       - message text cleaning (metadata, greetings, footers, signoffs, etc.)
     dedup.rs           - consecutive duplicate message removal
     pii.rs             - PII redaction (names, emails, phones, passwords)
+    pii_json.rs        - recursive JSON PII sanitization (athos-compatible)
     timeline.rs        - merge messages and attachments into a sorted timeline
     attachments.rs     - attachment extraction, filename sanitization, binary writing
   export/
     mod.rs             - output format dispatch
     markdown.rs        - markdown rendering of a processed ticket
+    json.rs            - JSON export with write-back, recursive PII, and sorted-key serialization
 config.toml            - default configuration file
 ```
 
@@ -126,6 +128,7 @@ Ticket {
   attachments: Vec<Attachment>,
   known_pii: Vec<String>,       // names, usernames extracted from ticket metadata
   opener: Option<String>,       // author of the first customer-facing message
+  raw_json: Option<Value>,      // original JSON, preserved only for Json output format
 }
 
 Message {
@@ -133,6 +136,7 @@ Message {
   timestamp: NaiveDateTime,
   text: String,
   internal: bool,
+  source_index: Option<usize>,  // position in original JSON array, for write-back in Json export
 }
 
 Attachment {
@@ -286,6 +290,27 @@ The export module dispatches on `output_format` from the config. Each format con
 
 The markdown output format (directory layout, `ticket.md` structure, heading rules, attachment listing) is fully specified in [`ticket_format_specification.md`](./ticket_format_specification.md). The export module implements that specification exactly.
 
+#### 4.8.2 JSON (`export/json.rs`)
+
+The JSON output format preserves the original ServiceNow JSON structure with normalized/deduped discussions and recursive PII sanitization across all fields. This is compatible with the athos filtering system.
+
+**Pipeline differences for JSON:**
+- The original parsed `serde_json::Value` is preserved in `ticket.raw_json` at load time.
+- Each message is tagged with `source_index` (its position in the original JSON discussion array).
+- Message-level PII (step 5) is **skipped** — the recursive JSON PII handles all strings.
+
+**Export steps:**
+1. **Write-back**: processed (normalized + deduped) message texts are written back into the `raw_json` discussion arrays. Filtered-out entries (system messages, empty after normalize, dedup'd) are removed from the arrays.
+2. **Recursive PII sanitization** (`pipeline/pii_json.rs`): walks the entire JSON tree and applies:
+   - **Structured user fields** (`assigned_to`, `caller_id`, `closed_by`, `created_by`, `opened_by`, `resolved_by`, `reopened_by`, `requested_for`, `sys_created_by`, `sys_updated_by`, `u_owner`, `u_user`, `owner`, `user`) → `USER_<HMAC10>`
+   - **Email fields** (`email`, `email_address`, `u_email_watchlist`, `u_email`) → `EMAIL_<HMAC10>`
+   - **Watch-list fields** (`u_itil_watch_list`, `u_user_watchlist`, `u_username_watchlist`, `watch_list`) → comma-separated `USER_<HMAC10>` aliases
+   - **All other strings** → free-text scan for emails, shell logins, NERSC paths, command user flags, phones, passwords, and Aho-Corasick name dictionary matches
+3. **Attachment copying**: files are copied from `input_dir` to `output_dir` preserving their relative paths (the `local_path` field in the JSON remains valid relative to the output root).
+4. **Serialization**: sorted keys, 2-space indentation, matching Python's `json.dump(indent=2, sort_keys=True)`.
+
+**Output path**: preserves the input file's relative path under `output_dir` (e.g. `output_dir/servicenow_incidents/INC022/90/24.json`).
+
 ## 5. Parallelism
 
 - Use **Rayon** for data-parallel iteration over the list of discovered JSON files.
@@ -296,7 +321,7 @@ The markdown output format (directory layout, `ticket.md` structure, heading rul
 
 When `mode = "update"`:
 1. Walk the input directory to collect all JSON file paths.
-2. **Before loading/processing each file**, do a lightweight pre-parse: read only `metadata.incident_number` and `incident_fields.opened_at` to compute the expected output path (`<output_dir>/YYYY/MM/INC########/ticket.md`).
+2. **Before loading/processing each file**, do a lightweight pre-parse: read only `metadata.incident_number` and `incident_fields.opened_at` to compute the expected output path (markdown: `<output_dir>/YYYY/MM/INC########/ticket.md`; JSON: `<output_dir>/<relative_input_path>`).
 3. Compare the input file's `mtime` against the output file's `mtime`.
 4. If the output file does not exist or the input is newer, proceed with full loading and processing. Otherwise skip the file entirely — no further I/O or CPU work.
 
@@ -334,5 +359,4 @@ No logging framework — if something goes wrong, print the error to stderr and 
 
 These are **not** part of the initial implementation but are planned:
 
-- **Athos output format**: an additional export format for the Athos system (to be specified later).
 - **Direct ServiceNow API integration**: fetch tickets directly from the ServiceNow API instead of reading from pre-exported JSON files.

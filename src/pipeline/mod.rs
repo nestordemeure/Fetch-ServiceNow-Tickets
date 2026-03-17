@@ -4,26 +4,27 @@ pub mod filter;
 pub mod load;
 pub mod normalize;
 pub mod pii;
+pub mod pii_json;
 pub mod timeline;
 
 use std::path::Path;
 
 use crate::export;
-use crate::types::{Config, Mode, TicketResult};
+use crate::types::{Config, Mode, OutputFormat, TicketResult};
 
 /// Process a single ticket JSON file through the full pipeline.
 pub fn process_ticket(path: &Path, config: &Config) -> Result<TicketResult, String> {
     // Step 0: Freshness check (update mode)
     if matches!(config.mode, Mode::Update) {
         let (incident_number, opened_date) = load::preparse_ticket(path)?;
-        let output_path = export::output_path(config, &incident_number, &opened_date);
+        let output_path = export::output_path(config, &incident_number, &opened_date, path);
         if is_up_to_date(path, &output_path)? {
             return Ok(TicketResult::UpToDate);
         }
     }
 
     // Step 1: Load
-    let mut ticket = load::load_ticket(path, &config.input_dir)?;
+    let mut ticket = load::load_ticket(path, &config.input_dir, &config.output_format)?;
 
     // Step 2a: Config-based filters (date, contact type, close code, state, creator, assignment group)
     if filter::should_skip_by_config(&ticket, &config.filter) {
@@ -46,8 +47,10 @@ pub fn process_ticket(path: &Path, config: &Config) -> Result<TicketResult, Stri
     // Step 4: Deduplicate
     ticket.messages = dedup::deduplicate(ticket.messages);
 
-    // Step 5: PII filtering
-    pii::filter_pii(&mut ticket, &config.pii_filter, config.deterministic_pii);
+    // Step 5: PII filtering (message-level, skipped for JSON — recursive PII handles it)
+    if !matches!(config.output_format, OutputFormat::Json) {
+        pii::filter_pii(&mut ticket, &config.pii_filter, config.deterministic_pii);
+    }
 
     // Step 6: Post-extraction filters
     if ticket.messages.is_empty() {
@@ -61,7 +64,7 @@ pub fn process_ticket(path: &Path, config: &Config) -> Result<TicketResult, Stri
     }
 
     // Step 7: Build timeline and export
-    export::export_ticket(config, &mut ticket)?;
+    export::export_ticket(config, &mut ticket, path)?;
 
     Ok(TicketResult::Processed)
 }

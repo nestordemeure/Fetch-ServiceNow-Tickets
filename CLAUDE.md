@@ -21,10 +21,12 @@ src/pipeline/filter.rs                   — ticket-level and message-level filt
 src/pipeline/normalize.rs                — message text cleaning (7-step pipeline)
 src/pipeline/dedup.rs                    — consecutive duplicate message removal
 src/pipeline/pii.rs                      — PII redaction (names, emails, phones, passwords)
+src/pipeline/pii_json.rs                 — recursive JSON PII sanitization (athos-compatible)
 src/pipeline/timeline.rs                 — merge messages + attachments into chronological timeline
 src/pipeline/attachments.rs              — filename sanitization, uniqueness, file copying
 src/export/mod.rs                        — output format dispatch
 src/export/markdown.rs                   — markdown rendering per ticket_format_specification.md
+src/export/json.rs                       — JSON export with write-back, recursive PII, sorted keys
 docs/SPECIFICATIONS.md                   — full implementation specification
 docs/ticket_format_specification.md      — output format and normalization rules
 ```

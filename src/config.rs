@@ -38,9 +38,10 @@ pub fn load_config(path: &str) -> Config {
 
     let output_format = match output_format_str.as_str() {
         "markdown" => OutputFormat::Markdown,
+        "json" => OutputFormat::Json,
         other => {
             eprintln!(
-                "ERROR: {}: invalid output_format '{}'. Valid values: \"markdown\"",
+                "ERROR: {}: invalid output_format '{}'. Valid values: \"markdown\", \"json\"",
                 path, other
             );
             std::process::exit(1);

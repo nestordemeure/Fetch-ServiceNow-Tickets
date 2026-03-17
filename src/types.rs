@@ -1,5 +1,6 @@
 use chrono::{NaiveDate, NaiveDateTime};
 use regex::Regex;
+use serde_json::Value;
 use std::path::PathBuf;
 
 pub struct Config {
@@ -32,6 +33,7 @@ pub enum PiiFilter {
 
 pub enum OutputFormat {
     Markdown,
+    Json,
 }
 
 pub enum Mode {
@@ -55,6 +57,8 @@ pub struct Ticket {
     pub known_pii: Vec<String>,
     /// Author of the first customer-facing message (the original asker).
     pub opener: Option<String>,
+    /// Original parsed JSON, preserved only when output_format is Json.
+    pub raw_json: Option<Value>,
 }
 
 pub struct Message {
@@ -62,6 +66,8 @@ pub struct Message {
     pub timestamp: NaiveDateTime,
     pub text: String,
     pub internal: bool,
+    /// Index in the original JSON discussion array, for write-back in JSON export.
+    pub source_index: Option<usize>,
 }
 
 pub struct Attachment {

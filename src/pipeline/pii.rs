@@ -60,7 +60,7 @@ fn redact_text(text: &str, name_matcher: &Option<AhoCorasick>, deterministic: bo
 
 // ── Deterministic hashing ─────────────────────────────────────────────────
 
-fn hmac_tag(input: &str) -> String {
+pub(crate) fn hmac_tag(input: &str) -> String {
     let mut mac =
         Hmac::<Sha256>::new_from_slice(HMAC_SALT).expect("HMAC accepts any key length");
     mac.update(input.to_lowercase().as_bytes());
@@ -71,7 +71,7 @@ fn hmac_tag(input: &str) -> String {
 
 // ── Emails ──────────────────────────────────────────────────────────────────
 
-fn email_regex() -> &'static Regex {
+pub(crate) fn email_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}").unwrap()
@@ -95,7 +95,7 @@ fn redact_emails(text: &str, deterministic: bool) -> String {
 // explicit separators in digit groups that look like phone numbers.
 // Avoids matching dates (2025-05-08), node IDs (003417), or other numeric data.
 
-fn phone_regex() -> &'static Regex {
+pub(crate) fn phone_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(concat!(
@@ -120,7 +120,7 @@ fn redact_phones(text: &str) -> String {
 
 // ── Passwords ───────────────────────────────────────────────────────────────
 
-fn password_regex() -> &'static Regex {
+pub(crate) fn password_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(r"(?i)((?:pass(?:word|wd|code)?|pin|secret)\s*[:=]\s*)\S+").unwrap()
@@ -136,7 +136,7 @@ fn redact_passwords(text: &str) -> String {
 // ── Username-in-context patterns ────────────────────────────────────────────
 // Detect usernames embedded in shell logins, NERSC paths, and command flags.
 
-fn shell_login_regex() -> &'static Regex {
+pub(crate) fn shell_login_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     // username@hostname-like (e.g. jsmith@perlmutter, user123@cori.nersc.gov)
     RE.get_or_init(|| {
@@ -144,7 +144,7 @@ fn shell_login_regex() -> &'static Regex {
     })
 }
 
-fn nersc_home_path_regex() -> &'static Regex {
+pub(crate) fn nersc_home_path_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     // /global/homes/u/username, /pscratch/sd/u/username, /global/cfs/cdirs/project/username
     RE.get_or_init(|| {
@@ -161,7 +161,7 @@ fn nersc_home_path_regex() -> &'static Regex {
     })
 }
 
-fn command_user_flag_regex() -> &'static Regex {
+pub(crate) fn command_user_flag_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     // -u username or --user username (space-separated)
     RE.get_or_init(|| {

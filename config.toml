@@ -4,7 +4,9 @@ input_dir = "/home/nestor/Documents/work/NERSC/tickets/demo_ticket_stash/pengfei
 # Path to the directory where processed tickets are written.
 output_dir = "./tickets"
 
-# Output format. Currently only "markdown" is supported.
+# Output format: "markdown" or "json".
+# "json" preserves the original JSON structure with normalized/deduped discussions
+# and recursive PII sanitization across all fields (athos-compatible).
 output_format = "markdown"
 
 # Update mode:
