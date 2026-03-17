@@ -1,0 +1,11 @@
+[package]
+name = "servicenow-ticket-processor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde_json = "1"
+toml = "0.8"
+rayon = "1"
+chrono = "0.4"
+regex = "1"

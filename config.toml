@@ -1,0 +1,14 @@
+# Path to the directory containing raw ServiceNow incident JSON files.
+input_dir = "/home/nestor/Documents/work/NERSC/tickets/demo_ticket_stash/pengfei"
+
+# Path to the directory where processed tickets are written.
+output_dir = "./tickets"
+
+# Output format. Currently only "markdown" is supported.
+output_format = "markdown"
+
+# Update mode:
+#   "replace" - wipe and rebuild the entire output directory.
+#   "update"  - only re-process tickets whose source JSON is newer
+#               than the corresponding output file (or has no output yet).
+mode = "replace"
