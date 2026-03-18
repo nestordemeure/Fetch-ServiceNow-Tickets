@@ -65,6 +65,9 @@ Ticket JSON files are discovered by `walkdir` (using `d_type` to avoid `stat()` 
    - Account reactivation variants such as `"Account Reactivation"` and `"reactivate account"`.
    - Account closure variants such as `"close account"` and `"closing account"`.
    - ERCAP workflow subjects such as `"ERCAP request"`, `"ERCAP Requests"`, and mailing-list replies beginning with `"Re: [Users] ERCAP"`.
+   - ERCAP status notifications and deadline reminder mailers such as `"Re: Your 2026 NERSC ERCAP Request # ERCAP... has been Denied."` and `"Re: ATTENTION, ACTION NEEDED: AY 2026 ERCAP renewal requests are due October 6th"`, including common `Fw:` / `Fwd:` / `Update Closed Incident:` variants.
+   - Allocation-overuse warnings such as `"Re: Utilization exceeding allocation(s) in your project"` and `"Re: Users exceeding their allocation in your project"`, including common `Fw:` / `Fwd:` / `[EXTERNAL]` variants.
+   - Allocation-award notifications such as `"Re: NERSC AY 2026 DOE Mission Science Allocation Award"`, `"Re: NERSC AY 2026 Director Reserve Allocation Award"`, and `"Re: NERSC Allocation Award"`, including common `Fw:` / `Fwd:` / `[EXTERNAL]` variants.
    - Exact match: `"Compute ReservationRequest"`.
    - Exact match: `"Realtime Queue Access Request"`.
    - Prefix: `"CPU Node hour increase request for project "` or `"GPU Node hour increase request for project "`.

@@ -98,6 +98,8 @@ Rules:
 - Skip tickets whose `short_description` is exactly `Ticket from Iris: New PI Account Request`.
 - Skip tickets whose `short_description` matches the storage-quota workflow subject family, including `Storage Quota increase`, `Storage Quota increase request: ...`, and `Storage Quota increase - extension`.
 - Skip tickets whose `short_description` matches the ERCAP workflow / announcement subject family, including `ERCAP request` and replies starting with `Re: [Users] ERCAP`.
+- Skip tickets whose `short_description` matches ERCAP status/deadline mailers, including `Re: Your 2026 NERSC ERCAP Request # ERCAP... has been Denied.` and `Re: ATTENTION, ACTION NEEDED: AY 2026 ERCAP renewal requests are due October 6th`, plus common forwarded / `Update Closed Incident:` variants.
+- Skip tickets whose `short_description` matches allocation-administration mailers, including `Re: Utilization exceeding allocation(s) in your project`, `Re: Users exceeding their allocation in your project`, and allocation-award notifications such as `Re: NERSC AY 2026 DOE Mission Science Allocation Award`.
 - Skip tickets whose `short_description` matches `Renewal of <training-name> Training for Staff`.
 - Skip tickets whose `short_description` includes `Training expiring`.
 - Skip tickets whose `short_description` includes `NERSC Account activation`.

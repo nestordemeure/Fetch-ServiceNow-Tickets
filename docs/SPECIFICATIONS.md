@@ -204,14 +204,18 @@ Skip the entire ticket if any of these match `short_description`:
 14. **Account closure workflow**: exact-match variants such as `"close account"`, `"Close my account please"`, `"Account Close"`, and `"closing account"`.
 15. **Compute reservation request variant**: exact match (case-insensitive) `"Compute ReservationRequest"`.
 16. **ERCAP workflow / announcement**: match (case-insensitive) subjects beginning with `"ERCAP request"` / `"ERCAP Requests"` or mailing-list reply subjects beginning with `"Re: [Users] ERCAP"`.
-17. **Realtime queue access request**: exact match (case-insensitive) `"Realtime Queue Access Request"`.
-18. **Node-hour increase request**: prefix match (case-insensitive) `"CPU Node hour increase request for project "` or `"GPU Node hour increase request for project "`.
-19. **Travel laptop workflow**: substring match (case-insensitive) containing `"travel laptop"`.
-20. **Daily screening alert**: prefix match (case-insensitive) `"Daily RPS Dynamic Screening Alert"`.
-21. **SLURM/Iris integration failure**: prefix match (case-insensitive) `"Failure to run slurm_iris.py on "`.
-22. **High-load warning**: prefix match (case-insensitive) `"[response required] high load on "`.
-23. **Scratch touch policy warning**: exact match (case-insensitive) `"[response required] touching files in your scratch directory"`.
-24. **Running-watch policy warning**: exact match (case-insensitive) `"[response required] running watch on NERSC systems"` or equivalent subject variants containing `"running watch on NERSC systems"`.
+17. **ERCAP status notification**: match (case-insensitive) `Re:` / `Fw:` / `Fwd:` subjects, with optional `Update Closed Incident:` and optional `[EXTERNAL]`, of the form `"Your <year> NERSC ERCAP Request # ERCAP<number> has been denied"`, `"needs revision"`, or `"has been submitted for review"`.
+18. **ERCAP deadline reminder**: match (case-insensitive) `Re:` / `Fw:` / `Fwd:` reminder mailers such as `"ATTENTION, ACTION NEEDED: AY <year> ERCAP renewal requests are due ..."`, `"Last chance to submit a renewal ERCAP request for AY <year>!"`, and reminder variants for ERCAP requests/proposals being due.
+19. **Allocation overuse notice**: match (case-insensitive) `Re:` / `Fw:` / `Fwd:` subjects, with optional `Update Closed Incident:` and optional `[EXTERNAL]`, for `"Utilization exceeding allocation(s) in your project"` or `"Users exceeding their allocation in your project"`.
+20. **Allocation award notice**: match (case-insensitive) `Re:` / `Fw:` / `Fwd:` subjects, with optional `Update Closed Incident:` and optional `[EXTERNAL]`, for `"NERSC Allocation Award"` and year-specific `"NERSC AY <year> DOE Mission Science Allocation Award"` / `"Director Reserve Allocation Award"` variants.
+21. **Realtime queue access request**: exact match (case-insensitive) `"Realtime Queue Access Request"`.
+22. **Node-hour increase request**: prefix match (case-insensitive) `"CPU Node hour increase request for project "` or `"GPU Node hour increase request for project "`.
+23. **Travel laptop workflow**: substring match (case-insensitive) containing `"travel laptop"`.
+24. **Daily screening alert**: prefix match (case-insensitive) `"Daily RPS Dynamic Screening Alert"`.
+25. **SLURM/Iris integration failure**: prefix match (case-insensitive) `"Failure to run slurm_iris.py on "`.
+26. **High-load warning**: prefix match (case-insensitive) `"[response required] high load on "`.
+27. **Scratch touch policy warning**: exact match (case-insensitive) `"[response required] touching files in your scratch directory"`.
+28. **Running-watch policy warning**: exact match (case-insensitive) `"[response required] running watch on NERSC systems"` or equivalent subject variants containing `"running watch on NERSC systems"`.
 25. **Training renewal**: regex match (case-insensitive) `^Renewal of .+ Training for Staff$`.
 26. **Training expiring**: substring match (case-insensitive) containing `"Training expiring"`.
 27. **Account activation**: substring match (case-insensitive) containing `"NERSC Account activation"`.

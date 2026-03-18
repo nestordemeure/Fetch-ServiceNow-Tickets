@@ -41,6 +41,14 @@ fn skip_patterns() -> &'static RegexSet {
             // is_ercap_request — workflow subjects and mailing-list announcement replies
             r"(?i)^ERCAP request(s)?(?:\b|$)",
             r"(?i)^Re:\s*\[Users\]\s*ERCAP\b",
+            // is_ercap_status_notification — review / denied / revision notifications
+            r"(?i)^(?:Update Closed Incident:\s*)?(?:Re|Fw|Fwd):\s*(?:\[EXTERNAL\]\s*)?Your \d{4} NERSC ERCAP Request # ERCAP\d+ (?:has been denied|needs revision|has been submitted for review)\.?\s*$",
+            // is_ercap_deadline_reminder — renewal reminder mailers
+            r"(?i)^(?:Update Closed Incident:\s*)?(?:Re|Fw|Fwd):\s*(?:\[Users\]\s*)?(?:Attention,\s*Action Needed:\s*AY \d{4} ERCAP renewal requests are due .+|Last chance to submit a renewal ERCAP request for AY \d{4}!|Reminder:\s*(?:\d{4}\s+)?ERCAP requests due today.*|Reminder:\s*ERCAP proposals(?: for \d{4} NERSC allocations)? due .+)$",
+            // is_allocation_overuse_notice — automated allocation warning mailers
+            r"(?i)^(?:Update Closed Incident:\s*)?(?:Re|Fw|Fwd):\s*(?:\[EXTERNAL\]\s*)?(?:Utilization exceeding allocation\(s\)|Users exceeding their allocation) in your project$",
+            // is_allocation_award_notice — allocation award notifications
+            r"(?i)^(?:Update Closed Incident:\s*)?(?:Re|Fw|Fwd):\s*(?:\[EXTERNAL\]\s*)?NERSC(?: AY \d{4})?(?: (?:DOE Mission Science|Director Reserve))? Allocation Award$",
             // is_realtime_queue_access_request — exact
             r"(?i)^Realtime Queue Access Request$",
             // is_node_hour_increase_request — prefix
@@ -166,6 +174,29 @@ mod tests {
         assert!(should_skip_ticket(&Some(
             "Re: [Users] ERCAP Requests due by 11:59 pm; Join us for ERCAP Office Hours!"
                 .to_string()
+        )));
+        assert!(should_skip_ticket(&Some(
+            "Re: Your 2024 NERSC ERCAP Request # ERCAP0033373 has been Denied.".to_string()
+        )));
+        assert!(should_skip_ticket(&Some(
+            "Re: ATTENTION, ACTION NEEDED: AY 2026 ERCAP renewal requests are due October 6th"
+                .to_string()
+        )));
+    }
+
+    #[test]
+    fn skips_allocation_admin_subjects() {
+        assert!(should_skip_ticket(&Some(
+            "Re: Utilization exceeding allocation(s) in your project".to_string()
+        )));
+        assert!(should_skip_ticket(&Some(
+            "Re: Users exceeding their allocation in your project".to_string()
+        )));
+        assert!(should_skip_ticket(&Some(
+            "Re: NERSC AY 2025 DOE Mission Science Allocation Award".to_string()
+        )));
+        assert!(should_skip_ticket(&Some(
+            "Fwd: NERSC AY 2026 Director Reserve Allocation Award".to_string()
         )));
     }
 
