@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 use aho_corasick::AhoCorasick;
 use hmac::{Hmac, Mac};
-use regex::Regex;
+use regex::{Regex, RegexSet};
 use sha2::Sha256;
 
 /// Fixed salt for deterministic HMAC pseudonymization.
@@ -21,6 +21,42 @@ pub(crate) fn hmac_tag(input: &str) -> String {
     hex::encode_upper(&result[..5])
 }
 
+/// Combined RegexSet for single-pass pre-screening of all PII patterns.
+/// Used by `might_contain_pii` to avoid running individual replacements
+/// when no patterns match at all — a single DFA pass instead of 5+ scans.
+fn pii_regex_set() -> &'static RegexSet {
+    static RS: OnceLock<RegexSet> = OnceLock::new();
+    RS.get_or_init(|| {
+        RegexSet::new([
+            // email
+            r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}",
+            // phone patterns
+            r"\+\d{1,3}[\s\-.]?\(?\d{2,3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}",
+            r"\(\d{3}\)\s?\d{3}[\s\-.]?\d{4}",
+            r"\b\d{3}[\-\.]\d{3}[\-\.]\d{4}\b",
+            // password
+            r"(?i)(?:pass(?:word|wd|code)?|pin|secret)\s*[:=]\s*\S+",
+            // shell login (user@host) — overlaps with email, but both need checking
+            r"[a-zA-Z][a-zA-Z0-9_]{1,31}@[a-zA-Z][a-zA-Z0-9.\-]+",
+            // nersc paths
+            r"/global/homes/[a-z]/[a-zA-Z][a-zA-Z0-9_]{1,31}",
+            r"/pscratch/sd/[a-z]/[a-zA-Z][a-zA-Z0-9_]{1,31}",
+            r"/global/cfs/cdirs/[a-zA-Z0-9_.\-]+/[a-zA-Z][a-zA-Z0-9_]{1,31}",
+            // command user flag
+            r"(?:--user\s+|-u\s+)[a-zA-Z][a-zA-Z0-9_]{1,31}\b",
+        ])
+        .unwrap()
+    })
+}
+
+/// Fast pre-check: does this text contain any PII-like patterns?
+/// Uses a single RegexSet DFA pass plus an Aho-Corasick check.
+/// When this returns false, `redact_text` would return the input unchanged.
+pub(crate) fn might_contain_pii(text: &str, name_matcher: &Option<AhoCorasick>) -> bool {
+    pii_regex_set().is_match(text)
+        || name_matcher.as_ref().is_some_and(|ac| ac.is_match(text))
+}
+
 /// Redact PII from a single text string.
 /// Applied in order: passwords, emails, username-in-context patterns, phones, then names.
 /// Uses Cow<str> throughout to avoid allocations when regexes don't match.
@@ -29,7 +65,10 @@ pub(crate) fn redact_text(text: &str, name_matcher: &Option<AhoCorasick>, determ
     let text: Cow<str> = redact_emails(&text, deterministic);
     let text: Cow<str> = redact_username_contexts(&text, deterministic);
     let text: Cow<str> = redact_phones(&text);
-    redact_names(&text, name_matcher, deterministic)
+    match redact_names(&text, name_matcher, deterministic) {
+        Cow::Borrowed(s) => s.to_string(),
+        Cow::Owned(s) => s,
+    }
 }
 
 // ── Emails ──────────────────────────────────────────────────────────────────
@@ -203,14 +242,15 @@ pub(crate) fn is_word_boundary(text: &str, pos: usize) -> bool {
     !bytes[pos].is_ascii_alphanumeric()
 }
 
-fn redact_names(text: &str, matcher: &Option<AhoCorasick>, deterministic: bool) -> String {
+fn redact_names<'a>(text: &'a str, matcher: &Option<AhoCorasick>, deterministic: bool) -> Cow<'a, str> {
     let ac = match matcher {
         Some(ac) => ac,
-        None => return text.to_string(),
+        None => return Cow::Borrowed(text),
     };
 
-    let mut result = String::with_capacity(text.len());
+    let mut result = String::new();
     let mut last_end = 0;
+    let mut had_match = false;
 
     for mat in ac.find_iter(text) {
         let start = mat.start();
@@ -218,6 +258,10 @@ fn redact_names(text: &str, matcher: &Option<AhoCorasick>, deterministic: bool) 
 
         // Only replace if the match is at word boundaries on both sides
         if is_word_boundary(text, start) && is_word_boundary(text, end) {
+            if !had_match {
+                result = String::with_capacity(text.len());
+                had_match = true;
+            }
             result.push_str(&text[last_end..start]);
             if deterministic {
                 let matched = &text[start..end];
@@ -229,6 +273,10 @@ fn redact_names(text: &str, matcher: &Option<AhoCorasick>, deterministic: bool) 
         }
     }
 
-    result.push_str(&text[last_end..]);
-    result
+    if had_match {
+        result.push_str(&text[last_end..]);
+        Cow::Owned(result)
+    } else {
+        Cow::Borrowed(text)
+    }
 }

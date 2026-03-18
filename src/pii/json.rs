@@ -76,7 +76,9 @@ pub fn sanitize_value(value: &mut Value, name_matcher: &Option<AhoCorasick>) {
             }
         }
         Value::String(s) => {
-            *s = redact::redact_text(s, name_matcher, true);
+            if redact::might_contain_pii(s, name_matcher) {
+                *s = redact::redact_text(s, name_matcher, true);
+            }
         }
         _ => {}
     }

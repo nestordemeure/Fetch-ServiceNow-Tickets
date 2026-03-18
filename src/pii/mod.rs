@@ -44,7 +44,7 @@ pub fn filter_pii(
             PiiFilter::None => unreachable!(),
         };
 
-        if should_filter {
+        if should_filter && redact::might_contain_pii(&msg.text, name_matcher) {
             msg.text = redact::redact_text(&msg.text, name_matcher, deterministic);
         }
     }

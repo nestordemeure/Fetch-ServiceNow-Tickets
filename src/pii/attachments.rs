@@ -56,9 +56,16 @@ pub fn try_redact_text_attachment(
         Err(_) => return Ok(false),
     };
 
+    // Fast pre-check: single RegexSet DFA pass + Aho-Corasick scan.
+    // Avoids running 5+ individual regex replacements when no PII patterns exist.
+    if !redact::might_contain_pii(text, name_matcher) {
+        return Ok(false);
+    }
+
     let redacted = redact::redact_text(text, name_matcher, deterministic);
 
-    // If nothing changed, no PII was found — let caller do normal copy/symlink
+    // Pre-check can have false positives (e.g. name match at non-word-boundary),
+    // so verify something actually changed.
     if redacted == text {
         return Ok(false);
     }
