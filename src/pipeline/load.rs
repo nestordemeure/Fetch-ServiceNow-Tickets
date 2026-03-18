@@ -182,10 +182,10 @@ fn parse_attachment(att: &Value, input_root: &Path, ctx: &str) -> Result<Attachm
 
 /// Strip "(staff work notes (NERSC private))" or similar suffix from internal authors.
 fn normalize_author(name: &str, internal: bool) -> String {
-    if internal {
-        if let Some(idx) = name.find(" (") {
-            return name[..idx].to_string();
-        }
+    if internal
+        && let Some(idx) = name.find(" (")
+    {
+        return name[..idx].to_string();
     }
     name.to_string()
 }

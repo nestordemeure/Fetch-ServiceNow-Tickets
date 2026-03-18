@@ -61,16 +61,16 @@ pub fn export(
     // Header
     md.push_str("# ");
     md.push_str(&ticket.incident_number);
-    if let Some(ref desc) = ticket.short_description {
-        if !desc.is_empty() {
-            md.push_str(" - ");
-            md.push_str(&redact_markdown_field(
-                desc,
-                name_matcher,
-                !matches!(config.pii_filter, PiiFilter::None),
-                config.deterministic_pii,
-            ));
-        }
+    if let Some(ref desc) = ticket.short_description
+        && !desc.is_empty()
+    {
+        md.push_str(" - ");
+        md.push_str(&redact_markdown_field(
+            desc,
+            name_matcher,
+            !matches!(config.pii_filter, PiiFilter::None),
+            config.deterministic_pii,
+        ));
     }
     md.push('\n');
 

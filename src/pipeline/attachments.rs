@@ -80,15 +80,15 @@ pub fn write_attachment(
 
     // If PII redaction is enabled, try to redact text attachments first.
     // On success (PII found and redacted), we're done — skip normal copy/symlink.
-    if let Some((name_matcher, deterministic)) = pii {
-        if crate::pii::attachments::try_redact_text_attachment(
+    if let Some((name_matcher, deterministic)) = pii
+        && crate::pii::attachments::try_redact_text_attachment(
             src,
             dest_path,
             name_matcher,
             deterministic,
-        )? {
-            return Ok(());
-        }
+        )?
+    {
+        return Ok(());
     }
 
     if symlink_attachments {

@@ -90,10 +90,10 @@ fn sanitize_user_field(value: &mut Value) {
         // Wrapped {"display_value": ..., "value": ...} form
         Value::Object(map) => {
             for val in map.values_mut() {
-                if let Value::String(s) = val {
-                    if !s.is_empty() {
-                        *s = format!("USER_{}", redact::hmac_tag(s));
-                    }
+                if let Value::String(s) = val
+                    && !s.is_empty()
+                {
+                    *s = format!("USER_{}", redact::hmac_tag(s));
                 }
             }
         }
@@ -111,10 +111,10 @@ fn sanitize_email_field(value: &mut Value) {
         }
         Value::Object(map) => {
             for val in map.values_mut() {
-                if let Value::String(s) = val {
-                    if !s.is_empty() {
-                        *s = format!("EMAIL_{}", redact::hmac_tag(s));
-                    }
+                if let Value::String(s) = val
+                    && !s.is_empty()
+                {
+                    *s = format!("EMAIL_{}", redact::hmac_tag(s));
                 }
             }
         }
@@ -144,22 +144,22 @@ fn sanitize_watch_list_field(value: &mut Value) {
         }
         Value::Object(map) => {
             for val in map.values_mut() {
-                if let Value::String(s) = val {
-                    if !s.is_empty() {
-                        let sanitized: Vec<String> = s
-                            .split(',')
-                            .map(|entry| {
-                                let entry = entry.trim();
-                                if entry.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!("USER_{}", redact::hmac_tag(entry))
-                                }
-                            })
-                            .filter(|e| !e.is_empty())
-                            .collect();
-                        *s = sanitized.join(", ");
-                    }
+                if let Value::String(s) = val
+                    && !s.is_empty()
+                {
+                    let sanitized: Vec<String> = s
+                        .split(',')
+                        .map(|entry| {
+                            let entry = entry.trim();
+                            if entry.is_empty() {
+                                String::new()
+                            } else {
+                                format!("USER_{}", redact::hmac_tag(entry))
+                            }
+                        })
+                        .filter(|e| !e.is_empty())
+                        .collect();
+                    *s = sanitized.join(", ");
                 }
             }
         }

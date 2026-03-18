@@ -42,13 +42,12 @@ pub fn build_timeline(messages: Vec<Message>, attachments: &[Attachment]) -> Vec
     // Merge consecutive attachment groups
     let mut merged: Vec<TimelineEntry> = Vec::with_capacity(entries.len());
     for entry in entries {
-        if let TimelineEntryKind::AttachmentGroup(files) = &entry.kind {
-            if let Some(last) = merged.last_mut() {
-                if let TimelineEntryKind::AttachmentGroup(ref mut prev_files) = last.kind {
-                    prev_files.extend(files.clone());
-                    continue;
-                }
-            }
+        if let TimelineEntryKind::AttachmentGroup(files) = &entry.kind
+            && let Some(last) = merged.last_mut()
+            && let TimelineEntryKind::AttachmentGroup(ref mut prev_files) = last.kind
+        {
+            prev_files.extend(files.clone());
+            continue;
         }
         merged.push(entry);
     }

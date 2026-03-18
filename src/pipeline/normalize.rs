@@ -1,4 +1,5 @@
 use std::sync::OnceLock;
+use std::collections::HashSet;
 
 use regex::Regex;
 
@@ -60,10 +61,10 @@ fn greeting_regex() -> &'static Regex {
 }
 
 fn remove_greeting(lines: &mut Vec<&str>) {
-    if let Some(i) = lines.iter().position(|l| !l.trim().is_empty()) {
-        if greeting_regex().is_match(&normalized_for_matching(lines[i])) {
-            lines.remove(i);
-        }
+    if let Some(i) = lines.iter().position(|l| !l.trim().is_empty())
+        && greeting_regex().is_match(&normalized_for_matching(lines[i]))
+    {
+        lines.remove(i);
     }
 }
 
@@ -98,8 +99,8 @@ fn is_trailing_date_line(line: &str) -> bool {
 
 fn is_email_quote_header(line: &str) -> bool {
     let trimmed = normalized_for_matching(line);
-    if !(trimmed.starts_with("on ") && trimmed.ends_with(" am"))
-        && !(trimmed.starts_with("on ") && trimmed.ends_with(" pm"))
+    if !(trimmed.starts_with("on ")
+        && (trimmed.ends_with(" am") || trimmed.ends_with(" pm")))
         && !(trimmed.starts_with("on ") && trimmed.contains(" at "))
     {
         return false;
@@ -123,7 +124,7 @@ fn footer_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r"^(?:nersc account and allocation support|nersc account allocations support|nersc consulting(?: user engagement group ueg)?|nersc user engagement group(?: lead)?|nersc data science engagement group|account and allocation support|allocations and account support|account support|nersc account support(?: .*)?|nersc user support team|the land i live and work on is the ancestral and unceded territory of the ohlone and bay miwok people|accounts nersc gov)$"
+            r"^(?:nersc account and allocation support|nersc account allocations support|nersc consulting(?: user engagement group ueg)?|nersc user engagement group(?: lead)?|nersc data science engagement group|nersc support(?: .*)?|account and allocation support|allocations and account support|account support|nersc account support(?: .*)?|nersc user support team|the land i live and work on is the ancestral and unceded territory of the ohlone and bay miwok people|accounts nersc gov)$"
         ).unwrap()
     })
 }
@@ -186,7 +187,7 @@ fn is_name_line(line: &str) -> bool {
         return false;
     }
     let word_count = trimmed.split_whitespace().count();
-    word_count >= 1 && word_count <= 4 && name_line_regex().is_match(trimmed)
+    (1..=4).contains(&word_count) && name_line_regex().is_match(trimmed)
 }
 
 fn signoff_with_name_regex() -> &'static Regex {
@@ -388,17 +389,20 @@ fn remove_author_name_lines(lines: &mut Vec<&str>, author: &str) {
         return;
     }
 
-    let author_lower = author.to_lowercase();
-    let parts: Vec<&str> = author.split_whitespace().collect();
+    let variants = author_line_variants(author);
+    let parts: Vec<&str> = author
+        .split_once(" (")
+        .map(|(base, _)| base)
+        .unwrap_or(author)
+        .split_whitespace()
+        .collect();
     let first_name = parts.first().map(|s| s.to_lowercase());
     // "First L." variant: first name + last initial with period
     let initial_variant = if parts.len() >= 2 {
         let last = parts.last().unwrap();
-        if let Some(ch) = last.chars().next() {
-            Some(format!("{} {}.", parts[0], ch).to_lowercase())
-        } else {
-            None
-        }
+        last.chars()
+            .next()
+            .map(|ch| format!("{} {}.", parts[0], ch).to_lowercase())
     } else {
         None
     };
@@ -410,23 +414,48 @@ fn remove_author_name_lines(lines: &mut Vec<&str>, author: &str) {
         }
         let lower = unquoted.to_lowercase();
         // Check full name
-        if lower == author_lower {
+        if variants.contains(&lower) {
             return false;
         }
         // Check first name
-        if let Some(ref first) = first_name {
-            if &lower == first {
-                return false;
-            }
+        if let Some(ref first) = first_name
+            && &lower == first
+        {
+            return false;
         }
         // Check "First L." variant
-        if let Some(ref variant) = initial_variant {
-            if &lower == variant {
-                return false;
-            }
+        if let Some(ref variant) = initial_variant
+            && &lower == variant
+        {
+            return false;
         }
         true
     });
+}
+
+fn author_line_variants(author: &str) -> HashSet<String> {
+    let mut variants = HashSet::new();
+    let mut current = author.trim();
+
+    while !current.is_empty() {
+        variants.insert(current.to_lowercase());
+        current = match current.split_once(" (") {
+            Some((base, _)) => base.trim_end(),
+            None => break,
+        };
+    }
+
+    let mut tokens: Vec<&str> = current.split_whitespace().collect();
+    while tokens.last().is_some_and(|token| {
+        token.chars().all(|ch| ch.is_ascii_uppercase() || ch == '-' || ch == '.')
+    }) {
+        tokens.pop();
+    }
+    if !tokens.is_empty() {
+        variants.insert(tokens.join(" ").to_lowercase());
+    }
+
+    variants
 }
 
 // ── Step 7: Trim blank lines ────────────────────────────────────────────────
@@ -538,5 +567,14 @@ mod tests {
 
         let text = "Email received from: [EMAIL]";
         assert_eq!(clean_message_text(text, ""), "");
+    }
+
+    #[test]
+    fn removes_support_footer_and_bare_name_from_admin_author_variant() {
+        let text = "There was a problem with a filegroup - fixed it and added the user to repo m2420.\n\nMark Heer\nNERSC Support";
+        assert_eq!(
+            clean_message_text(text, "Mark Heer ADMIN (mheer-ADMIN)"),
+            "There was a problem with a filegroup - fixed it and added the user to repo m2420."
+        );
     }
 }

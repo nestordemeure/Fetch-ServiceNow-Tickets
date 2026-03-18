@@ -15,15 +15,15 @@ fn main() {
     let config = config::load_config("config.toml");
 
     // In replace mode, wipe the output directory
-    if matches!(config.mode, Mode::Replace) && config.output_dir.exists() {
-        if let Err(e) = std::fs::remove_dir_all(&config.output_dir) {
-            eprintln!(
-                "ERROR: cannot remove output directory {}: {}",
-                config.output_dir.display(),
-                e
-            );
-            std::process::exit(1);
-        }
+    if matches!(config.mode, Mode::Replace) && config.output_dir.exists()
+        && let Err(e) = std::fs::remove_dir_all(&config.output_dir)
+    {
+        eprintln!(
+            "ERROR: cannot remove output directory {}: {}",
+            config.output_dir.display(),
+            e
+        );
+        std::process::exit(1);
     }
 
     // Discover all JSON files. walkdir uses d_type from readdir() on Linux,
