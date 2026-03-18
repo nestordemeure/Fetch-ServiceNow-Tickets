@@ -2,9 +2,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use aho_corasick::AhoCorasick;
+use rayon::prelude::*;
 use serde_json::Value;
 
-use crate::pipeline::{attachments, pii_json};
+use crate::pipeline::attachments;
+use crate::pii;
 use crate::types::Ticket;
 
 /// Compute the output path for a ticket's JSON file.
@@ -23,6 +25,8 @@ pub fn export(
     input_dir: &Path,
     output_dir: &Path,
     symlink_attachments: bool,
+    name_matcher: &Option<AhoCorasick>,
+    pii_for_attachments: Option<(&Option<AhoCorasick>, bool)>,
 ) -> Result<(), String> {
     let raw_json = ticket
         .raw_json
@@ -34,26 +38,16 @@ pub fn export(
     // Step 1: Write processed messages back into raw JSON
     write_back_messages(&mut data, &ticket.messages);
 
-    // Step 2: Build Aho-Corasick name matcher for PII
-    let name_matcher = if !ticket.known_pii.is_empty() {
-        AhoCorasick::builder()
-            .ascii_case_insensitive(true)
-            .build(&ticket.known_pii)
-            .ok()
-    } else {
-        None
-    };
+    // Step 2: Recursive PII sanitization on the entire JSON tree
+    pii::json::sanitize_value(&mut data, name_matcher);
 
-    // Step 3: Recursive PII sanitization on the entire JSON tree
-    pii_json::sanitize_value(&mut data, &name_matcher);
+    // Step 3: Copy or symlink attachment files, preserving relative paths
+    write_attachments_json(&data, input_dir, output_dir, symlink_attachments, pii_for_attachments)?;
 
-    // Step 4: Copy or symlink attachment files, preserving relative paths
-    write_attachments_json(&data, input_dir, output_dir, symlink_attachments)?;
-
-    // Step 5: Serialize with sorted keys + pretty-print
+    // Step 4: Serialize with sorted keys + pretty-print
     let output = serialize_sorted(&data);
 
-    // Step 6: Write JSON file
+    // Step 5: Write JSON file
     let out_path = output_path(json_input_path, input_dir, output_dir);
     if let Some(parent) = out_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
@@ -138,32 +132,35 @@ fn write_attachments_json(
     input_dir: &Path,
     output_dir: &Path,
     symlink_attachments: bool,
+    pii: Option<(&Option<AhoCorasick>, bool)>,
 ) -> Result<(), String> {
-    if let Some(atts) = data.get("attachments").and_then(|a| a.as_array()) {
-        for att in atts {
-            let local_path_str = match att.get("local_path").and_then(|v| v.as_str()) {
-                Some(s) => s,
-                None => continue,
-            };
+    let work: Vec<(PathBuf, PathBuf)> = match data.get("attachments").and_then(|a| a.as_array()) {
+        Some(atts) => atts
+            .iter()
+            .filter_map(|att| {
+                let local_path_str = att.get("local_path").and_then(|v| v.as_str())?;
+                Some((input_dir.join(local_path_str), output_dir.join(local_path_str)))
+            })
+            .collect(),
+        None => return Ok(()),
+    };
 
-            let src = input_dir.join(local_path_str);
-            let dst = output_dir.join(local_path_str);
-
-            if let Some(parent) = dst.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    format!(
-                        "cannot create attachment directory {}: {}",
-                        parent.display(),
-                        e
-                    )
-                })?;
-            }
-
-            attachments::write_attachment(&src, &dst, "attachment", symlink_attachments)?;
+    // Create parent directories up front (cheap, idempotent, avoids races)
+    for (_, dst) in &work {
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                format!(
+                    "cannot create attachment directory {}: {}",
+                    parent.display(),
+                    e
+                )
+            })?;
         }
     }
 
-    Ok(())
+    work.par_iter().try_for_each(|(src, dst)| {
+        attachments::write_attachment(src, dst, "attachment", symlink_attachments, pii)
+    })
 }
 
 /// Serialize a JSON value with sorted keys and 2-space indentation.

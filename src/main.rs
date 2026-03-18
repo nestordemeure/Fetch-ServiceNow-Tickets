@@ -1,5 +1,6 @@
 mod config;
 mod export;
+mod pii;
 mod pipeline;
 mod types;
 

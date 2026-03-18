@@ -56,16 +56,19 @@ src/
   main.rs              - entry point: loads config, orchestrates the pipeline
   config.rs            - TOML config parsing and validation
   types.rs             - shared data structures (Ticket, Message, Attachment, TimelineEntry)
+  pii/
+    mod.rs             - PII public API: build_name_matcher(), filter_pii()
+    redact.rs          - string-level PII: regexes, hmac_tag(), redact_text(), all helpers
+    json.rs            - recursive JSON tree PII sanitization (athos-compatible)
+    attachments.rs     - text file detection + PII redaction for attachment files
   pipeline/
     mod.rs             - pipeline module, per-ticket processing orchestration
     load.rs            - JSON deserialization of a ticket file into model types
     filter.rs          - ticket-level and message-level filtering rules
     normalize.rs       - message text cleaning (metadata, greetings, footers, signoffs, etc.)
     dedup.rs           - consecutive duplicate message removal
-    pii.rs             - PII redaction (names, emails, phones, passwords)
-    pii_json.rs        - recursive JSON PII sanitization (athos-compatible)
     timeline.rs        - merge messages and attachments into a sorted timeline
-    attachments.rs     - attachment extraction, filename sanitization, binary writing
+    attachments.rs     - attachment extraction, filename sanitization, PII-aware writing
   export/
     mod.rs             - output format dispatch
     markdown.rs        - markdown rendering of a processed ticket
@@ -233,7 +236,7 @@ Two consecutive messages are duplicates if:
 
 Keep only the first occurrence.
 
-### 4.5 PII Filtering (`pipeline/pii.rs`)
+### 4.5 PII Filtering (`pii/`)
 
 Controlled by the `pii_filter` config field. Applied after normalization and deduplication.
 
@@ -285,7 +288,7 @@ Consecutive attachment entries are merged into a single `AttachmentGroup`.
 
 - **Sanitize filename**: replace `/` and `\` with `_`, remove non-alphanumeric characters (except `.`, `_`, `-`, space), strip leading/trailing spaces and dots, fall back to `"attachment"` if empty.
 - **Ensure uniqueness**: append `_2`, `_3`, etc. on collision. Reserved filenames (e.g. `ticket.md` for the markdown format) are defined by the exporter.
-- **Write to disk**: write the file from `local_path` (resolved relative to `input_dir`) into the ticket's output directory, either as a symbolic link or as a copied file depending on `symlink_attachments`. Failures are surfaced as hard errors by the exporter.
+- **Write to disk**: write the file from `local_path` (resolved relative to `input_dir`) into the ticket's output directory, either as a symbolic link or as a copied file depending on `symlink_attachments`. When PII filtering is enabled (`pii_filter != "none"`), text attachments are checked for PII before writing: files with known binary extensions (images, archives, documents, etc.) are skipped immediately; all other files are read and, if valid UTF-8, run through the PII redaction pipeline. If PII is found and redacted, the redacted content is written to disk (overriding symlink mode). If no PII is found, the normal copy/symlink path is used. Binary files and non-UTF-8 files are always copied/symlinked without modification. Failures are surfaced as hard errors by the exporter.
 
 ### 4.8 Export (`export/`)
 
@@ -313,7 +316,7 @@ The JSON output format preserves the original ServiceNow JSON structure with nor
 
 **Export steps:**
 1. **Write-back**: processed (normalized + deduped) message texts are written back into the `raw_json` discussion arrays. Filtered-out entries (system messages, empty after normalize, dedup'd) are removed from the arrays.
-2. **Recursive PII sanitization** (`pipeline/pii_json.rs`): walks the entire JSON tree and applies:
+2. **Recursive PII sanitization** (`pii/json.rs`): walks the entire JSON tree and applies:
    - **Structured user fields** (`assigned_to`, `caller_id`, `closed_by`, `created_by`, `opened_by`, `resolved_by`, `reopened_by`, `requested_for`, `sys_created_by`, `sys_updated_by`, `u_owner`, `u_user`, `owner`, `user`) → `USER_<HMAC10>`
    - **Email fields** (`email`, `email_address`, `u_email_watchlist`, `u_email`) → `EMAIL_<HMAC10>`
    - **Watch-list fields** (`u_itil_watch_list`, `u_user_watchlist`, `u_username_watchlist`, `watch_list`) → comma-separated `USER_<HMAC10>` aliases

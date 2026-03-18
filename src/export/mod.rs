@@ -3,6 +3,7 @@ pub mod markdown;
 
 use std::path::{Path, PathBuf};
 
+use aho_corasick::AhoCorasick;
 use chrono::NaiveDate;
 
 use crate::types::{Config, OutputFormat, Ticket};
@@ -34,9 +35,11 @@ pub fn export_ticket(
     config: &Config,
     ticket: &mut Ticket,
     json_input_path: &Path,
+    name_matcher: &Option<AhoCorasick>,
+    pii_for_attachments: Option<(&Option<AhoCorasick>, bool)>,
 ) -> Result<(), String> {
     match config.output_format {
-        OutputFormat::Markdown => markdown::export(config, ticket),
+        OutputFormat::Markdown => markdown::export(config, ticket, pii_for_attachments),
         OutputFormat::Json => {
             json::export(
                 ticket,
@@ -44,6 +47,8 @@ pub fn export_ticket(
                 &config.input_dir,
                 &config.output_dir,
                 config.symlink_attachments,
+                name_matcher,
+                pii_for_attachments,
             )
         }
     }

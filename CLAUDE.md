@@ -15,15 +15,17 @@ config.toml                              — runtime configuration (all fields r
 src/main.rs                              — entry point, file discovery, rayon parallel processing, summary
 src/config.rs                            — TOML config parsing and validation
 src/types.rs                             — all shared types (Ticket, Message, Attachment, Config, etc.)
+src/pii/mod.rs                           — PII public API: build_name_matcher(), filter_pii(), re-exports
+src/pii/redact.rs                        — string-level PII: regexes, hmac_tag(), redact_text(), all helpers
+src/pii/json.rs                          — recursive JSON tree PII sanitization (athos-compatible)
+src/pii/attachments.rs                   — text file detection + PII redaction for attachment files
 src/pipeline/mod.rs                      — per-ticket processing orchestration
 src/pipeline/load.rs                     — JSON deserialization into internal types
 src/pipeline/filter.rs                   — ticket-level and message-level filtering rules
 src/pipeline/normalize.rs                — message text cleaning (7-step pipeline)
 src/pipeline/dedup.rs                    — consecutive duplicate message removal
-src/pipeline/pii.rs                      — PII redaction (names, emails, phones, passwords)
-src/pipeline/pii_json.rs                 — recursive JSON PII sanitization (athos-compatible)
 src/pipeline/timeline.rs                 — merge messages + attachments into chronological timeline
-src/pipeline/attachments.rs              — filename sanitization, uniqueness, file copying
+src/pipeline/attachments.rs              — filename sanitization, uniqueness, file copying/symlinking, PII-aware writing
 src/export/mod.rs                        — output format dispatch
 src/export/markdown.rs                   — markdown rendering per ticket_format_specification.md
 src/export/json.rs                       — JSON export with write-back, recursive PII, sorted keys

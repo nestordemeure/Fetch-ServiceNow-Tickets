@@ -6,59 +6,9 @@ use hmac::{Hmac, Mac};
 use regex::Regex;
 use sha2::Sha256;
 
-use crate::types::{PiiFilter, Ticket};
-
 /// Fixed salt for deterministic HMAC pseudonymization.
 /// Not for security — just for consistency across runs.
 const HMAC_SALT: &[u8] = b"nersc-ticket-processor-v1";
-
-/// Apply PII filtering to a ticket's messages.
-///
-/// Depending on `pii_filter`:
-///   - `All`:   filter all messages.
-///   - `Asker`: filter only messages from the ticket opener (non-staff).
-///   - `None`:  no-op.
-pub fn filter_pii(ticket: &mut Ticket, pii_filter: &PiiFilter, deterministic: bool) {
-    if matches!(pii_filter, PiiFilter::None) {
-        return;
-    }
-
-    // Build an Aho-Corasick automaton for known names/usernames from this ticket.
-    let name_matcher = if !ticket.known_pii.is_empty() {
-        AhoCorasick::builder()
-            .ascii_case_insensitive(true)
-            .build(&ticket.known_pii)
-            .ok()
-    } else {
-        None
-    };
-
-    for msg in &mut ticket.messages {
-        let should_filter = match pii_filter {
-            PiiFilter::All => true,
-            PiiFilter::Asker => match &ticket.opener {
-                Some(opener) => msg.author == *opener,
-                None => !msg.internal,
-            },
-            PiiFilter::None => unreachable!(),
-        };
-
-        if should_filter {
-            msg.text = redact_text(&msg.text, &name_matcher, deterministic);
-        }
-    }
-}
-
-/// Redact PII from a single text string.
-/// Applied in order: passwords, emails, username-in-context patterns, phones, then names.
-/// Uses Cow<str> throughout to avoid allocations when regexes don't match.
-fn redact_text(text: &str, name_matcher: &Option<AhoCorasick>, deterministic: bool) -> String {
-    let text: Cow<str> = redact_passwords(text);
-    let text: Cow<str> = redact_emails(&text, deterministic);
-    let text: Cow<str> = redact_username_contexts(&text, deterministic);
-    let text: Cow<str> = redact_phones(&text);
-    redact_names(&text, name_matcher, deterministic)
-}
 
 // ── Deterministic hashing ─────────────────────────────────────────────────
 
@@ -69,6 +19,17 @@ pub(crate) fn hmac_tag(input: &str) -> String {
     let result = mac.finalize().into_bytes();
     // Take first 5 bytes = 10 hex chars
     hex::encode_upper(&result[..5])
+}
+
+/// Redact PII from a single text string.
+/// Applied in order: passwords, emails, username-in-context patterns, phones, then names.
+/// Uses Cow<str> throughout to avoid allocations when regexes don't match.
+pub(crate) fn redact_text(text: &str, name_matcher: &Option<AhoCorasick>, deterministic: bool) -> String {
+    let text: Cow<str> = redact_passwords(text);
+    let text: Cow<str> = redact_emails(&text, deterministic);
+    let text: Cow<str> = redact_username_contexts(&text, deterministic);
+    let text: Cow<str> = redact_phones(&text);
+    redact_names(&text, name_matcher, deterministic)
 }
 
 // ── Emails ──────────────────────────────────────────────────────────────────
@@ -232,7 +193,7 @@ fn redact_username_contexts<'a>(text: &'a str, deterministic: bool) -> Cow<'a, s
 // ── Names (dictionary-based) ────────────────────────────────────────────────
 
 /// Check if a byte position is at a word boundary (not adjacent to an alphanumeric char).
-fn is_word_boundary(text: &str, pos: usize) -> bool {
+pub(crate) fn is_word_boundary(text: &str, pos: usize) -> bool {
     if pos == 0 || pos >= text.len() {
         return true;
     }

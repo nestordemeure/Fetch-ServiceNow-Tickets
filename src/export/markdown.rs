@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use aho_corasick::AhoCorasick;
 use chrono::NaiveDate;
 
 use crate::pipeline::{attachments, timeline};
@@ -18,7 +19,11 @@ pub fn output_path(output_dir: &Path, incident_number: &str, opened_date: &Naive
 }
 
 /// Export a ticket as markdown.
-pub fn export(config: &Config, ticket: &mut Ticket) -> Result<(), String> {
+pub fn export(
+    config: &Config,
+    ticket: &mut Ticket,
+    pii_for_attachments: Option<(&Option<AhoCorasick>, bool)>,
+) -> Result<(), String> {
     let ticket_dir = {
         let year = ticket.opened_date.format("%Y").to_string();
         let month = ticket.opened_date.format("%m").to_string();
@@ -111,6 +116,7 @@ pub fn export(config: &Config, ticket: &mut Ticket) -> Result<(), String> {
         &ticket.attachments,
         &ticket_dir,
         config.symlink_attachments,
+        pii_for_attachments,
     )?;
 
     Ok(())

@@ -75,12 +75,12 @@ Ticket JSON files are discovered by `walkdir` (using `d_type` to avoid `stat()` 
 8. **Build timeline**: merge messages and attachments into chronological order (sorted by timestamp, messages before attachments at equal timestamps, consecutive attachments grouped). Attachment filenames are sanitized for uniqueness before export.
 
 9. **Export**: render the timeline in the configured output format and write to disk:
-   - **Markdown**: write `<output_dir>/YYYY/MM/INC########/ticket.md`, then write any attachment outputs alongside it. When `symlink_attachments = true`, those outputs are symbolic links to the source files; when `false`, they are copied files. If an attachment write fails, the markdown file is left in place as partial output.
-   - **JSON**: write processed messages back into the original JSON structure, apply recursive PII sanitization to the entire JSON tree (structured user fields → `USER_<HMAC>`, email fields → `EMAIL_<HMAC>`, watch-list fields → comma-separated aliases, all other strings → free-text scan for emails, shell logins, NERSC paths, command flags, phones, passwords, and names), serialize with sorted keys and 2-space indentation, and write to `<output_dir>/<relative_input_path>`. Attachment outputs preserve their relative paths from the input directory and are symlinked or copied according to `symlink_attachments`.
+   - **Markdown**: write `<output_dir>/YYYY/MM/INC########/ticket.md`, then write any attachment outputs alongside it. When `symlink_attachments = true`, those outputs are symbolic links to the source files; when `false`, they are copied files. When PII filtering is enabled, text attachments are scanned for PII and written with redacted content if any is found (overriding symlink mode for those files). Binary and non-UTF-8 files are always copied/symlinked without modification. If an attachment write fails, the markdown file is left in place as partial output.
+   - **JSON**: write processed messages back into the original JSON structure, apply recursive PII sanitization to the entire JSON tree (structured user fields → `USER_<HMAC>`, email fields → `EMAIL_<HMAC>`, watch-list fields → comma-separated aliases, all other strings → free-text scan for emails, shell logins, NERSC paths, command flags, phones, passwords, and names), serialize with sorted keys and 2-space indentation, and write to `<output_dir>/<relative_input_path>`. Attachment outputs preserve their relative paths from the input directory and are symlinked or copied according to `symlink_attachments`. Text attachments are PII-scanned when PII filtering is enabled (always deterministic for JSON).
 
 ## TODO
 
-- anonymize text attachements
+- run clippy over everything
 - review all texts (readme, claude, specs)
 - Import tickets directly from the ServiceNow API
   - Add scron script to refresh tickets regularly

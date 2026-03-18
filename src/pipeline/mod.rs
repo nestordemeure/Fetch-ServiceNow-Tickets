@@ -3,14 +3,13 @@ pub mod dedup;
 pub mod filter;
 pub mod load;
 pub mod normalize;
-pub mod pii;
-pub mod pii_json;
 pub mod timeline;
 
 use std::path::Path;
 
 use crate::export;
-use crate::types::{Config, Mode, OutputFormat, TicketResult};
+use crate::pii;
+use crate::types::{Config, Mode, OutputFormat, PiiFilter, TicketResult};
 
 /// Process a single ticket JSON file through the full pipeline.
 pub fn process_ticket(path: &Path, config: &Config) -> Result<TicketResult, String> {
@@ -61,9 +60,12 @@ pub fn process_ticket(path: &Path, config: &Config) -> Result<TicketResult, Stri
     // Step 4: Deduplicate
     ticket.messages = dedup::deduplicate(ticket.messages);
 
+    // Build name matcher once for all PII operations
+    let name_matcher = pii::build_name_matcher(&ticket.known_pii);
+
     // Step 5: PII filtering (message-level, skipped for JSON — recursive PII handles it)
     if !matches!(config.output_format, OutputFormat::Json) {
-        pii::filter_pii(&mut ticket, &config.pii_filter, config.deterministic_pii);
+        pii::filter_pii(&mut ticket, &config.pii_filter, &name_matcher, config.deterministic_pii);
     }
 
     // Step 6: Post-extraction filters
@@ -77,8 +79,19 @@ pub fn process_ticket(path: &Path, config: &Config) -> Result<TicketResult, Stri
         return Ok(TicketResult::Filtered);
     }
 
+    // Determine PII context for attachment writing
+    let pii_for_attachments = if !matches!(config.pii_filter, PiiFilter::None) {
+        let deterministic = match config.output_format {
+            OutputFormat::Json => true,
+            OutputFormat::Markdown => config.deterministic_pii,
+        };
+        Some((&name_matcher, deterministic))
+    } else {
+        None
+    };
+
     // Step 7: Build timeline and export
-    export::export_ticket(config, &mut ticket, path)?;
+    export::export_ticket(config, &mut ticket, path, &name_matcher, pii_for_attachments)?;
 
     Ok(TicketResult::Processed)
 }
