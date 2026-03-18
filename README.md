@@ -50,8 +50,29 @@ Ticket JSON files are discovered by `walkdir` (using `d_type` to avoid `stat()` 
    - `exclude_assignment_group`: exclude tickets whose assignment group matches a regex.
 
 3. **Filter (short_description)**: skip the ticket if its `short_description` matches any of:
-   - Exact match: `"Ticket from Iris: New PI Account Request"`.
-   - Prefix: `"Storage Quota Increase request:"`.
+   - Prefix: `"Ticket from Iris:"`.
+   - Exact match: `"Storage Quota increase request"` or prefix `"Storage Quota Increase request:"`.
+   - Exact match: `"Compute Reservation Request"`.
+   - Exact match: `"Perlmutter access request"` or `"Request perlmutter access"`.
+   - Exact match: `"GPU nodes access request"` or `"Request access GPU nodes"`.
+   - Exact match: `"VASP license Confirmation Request to Access NERSC Provided VASP Binaries"`.
+   - Exact match: `"Collaboration account request"`, `"Request collaboration account"`, or `"Request a collaboration account"`.
+   - Exact match: `"Training Accounts Request"`.
+   - Exact match: `"NERSC IP REQUEST"`.
+   - Exact match: `"NERSC CNAME REQUEST"`.
+   - Exact match: `"Re: Your NERSC account request is being processed"`.
+   - Exact match: `"Re: Your NERSC account in the new allocation year"`.
+   - Account reactivation variants such as `"Account Reactivation"` and `"reactivate account"`.
+   - Account closure variants such as `"close account"` and `"closing account"`.
+   - Exact match: `"Compute ReservationRequest"`.
+   - Exact match: `"Realtime Queue Access Request"`.
+   - Prefix: `"CPU Node hour increase request for project "` or `"GPU Node hour increase request for project "`.
+   - Substring: `"travel laptop"`.
+   - Prefix: `"Daily RPS Dynamic Screening Alert"`.
+   - Prefix: `"Failure to run slurm_iris.py on "`.
+   - Prefix: `"[response required] high load on "`.
+   - Exact match: `"[response required] touching files in your scratch directory"`.
+   - Exact match: `"[response required] running watch on NERSC systems"` or subject variants ending in `"running watch on NERSC systems"`.
    - Regex: `^Renewal of .+ Training for Staff$`.
    - Substring: `"Training expiring"`.
    - Substring: `"NERSC Account activation"`.
@@ -81,7 +102,8 @@ Ticket JSON files are discovered by `walkdir` (using `d_type` to avoid `stat()` 
 ## TODO
 
 - run clippy over everything
-- look at processed tickets for missed PII, and useless tickets opportunity (looking at tickets whose title / content is similar to each others)
+- can ticket filtering be done with a single regexp instead of many ors?
+- look at processed tickets for missed PII
 - review all texts (readme, claude, specs)
 - Import tickets directly from the ServiceNow API
   - Add scron script to refresh tickets regularly

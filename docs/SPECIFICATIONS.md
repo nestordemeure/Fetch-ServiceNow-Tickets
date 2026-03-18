@@ -188,11 +188,32 @@ Skip the ticket based on configurable rules in the `[filter]` config section. Ch
 #### 4.2.2 Short-Description Filters
 
 Skip the entire ticket if any of these match `short_description`:
-1. **Iris PI request**: exact match (case-insensitive) `"Ticket from Iris: New PI Account Request"`.
-2. **Storage quota increase**: prefix match (case-insensitive) `"Storage Quota Increase request:"`.
-3. **Training renewal**: regex match (case-insensitive) `^Renewal of .+ Training for Staff$`.
-4. **Training expiring**: substring match (case-insensitive) containing `"Training expiring"`.
-5. **Account activation**: substring match (case-insensitive) containing `"NERSC Account activation"`.
+1. **Iris workflow ticket**: prefix match (case-insensitive) `"Ticket from Iris:"`.
+2. **Storage quota increase**: exact match (case-insensitive) `"Storage Quota increase request"` or prefix match `"Storage Quota Increase request:"`.
+3. **Compute reservation request**: exact match (case-insensitive) `"Compute Reservation Request"`.
+4. **Perlmutter access request**: exact match (case-insensitive) `"Perlmutter access request"` or `"Request perlmutter access"`.
+5. **GPU nodes access request**: exact match (case-insensitive) `"GPU nodes access request"` or `"Request access GPU nodes"`.
+6. **VASP license confirmation request**: exact match (case-insensitive) `"VASP license Confirmation Request to Access NERSC Provided VASP Binaries"`.
+7. **Collaboration account request**: exact match (case-insensitive) `"Collaboration account request"`, `"Request collaboration account"`, or `"Request a collaboration account"`.
+8. **Training accounts request**: exact match (case-insensitive) `"Training Accounts Request"`.
+9. **NERSC IP request**: exact match (case-insensitive) `"NERSC IP REQUEST"`.
+10. **NERSC CNAME request**: exact match (case-insensitive) `"NERSC CNAME REQUEST"`.
+11. **Account request being processed**: exact match (case-insensitive) `"Re: Your NERSC account request is being processed"`.
+12. **Account in new allocation year**: exact match (case-insensitive) `"Re: Your NERSC account in the new allocation year"`.
+13. **Account reactivation workflow**: exact-match variants such as `"Account Reactivation"`, `"reactivation account"`, `"reactivate account"`, `"Reactivate my account"`, and `"Reactivating NERSC account"`.
+14. **Account closure workflow**: exact-match variants such as `"close account"`, `"Close my account please"`, `"Account Close"`, and `"closing account"`.
+15. **Compute reservation request variant**: exact match (case-insensitive) `"Compute ReservationRequest"`.
+16. **Realtime queue access request**: exact match (case-insensitive) `"Realtime Queue Access Request"`.
+17. **Node-hour increase request**: prefix match (case-insensitive) `"CPU Node hour increase request for project "` or `"GPU Node hour increase request for project "`.
+18. **Travel laptop workflow**: substring match (case-insensitive) containing `"travel laptop"`.
+19. **Daily screening alert**: prefix match (case-insensitive) `"Daily RPS Dynamic Screening Alert"`.
+20. **SLURM/Iris integration failure**: prefix match (case-insensitive) `"Failure to run slurm_iris.py on "`.
+21. **High-load warning**: prefix match (case-insensitive) `"[response required] high load on "`.
+22. **Scratch touch policy warning**: exact match (case-insensitive) `"[response required] touching files in your scratch directory"`.
+23. **Running-watch policy warning**: exact match (case-insensitive) `"[response required] running watch on NERSC systems"` or equivalent subject variants containing `"running watch on NERSC systems"`.
+24. **Training renewal**: regex match (case-insensitive) `^Renewal of .+ Training for Staff$`.
+25. **Training expiring**: substring match (case-insensitive) containing `"Training expiring"`.
+26. **Account activation**: substring match (case-insensitive) containing `"NERSC Account activation"`.
 
 #### 4.2.3 Message-Level Filters
 
