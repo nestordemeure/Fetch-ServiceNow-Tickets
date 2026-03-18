@@ -95,7 +95,8 @@ Rules:
 ### Filtering
 
 - Skip tickets whose `short_description` is exactly `Ticket from Iris: New PI Account Request`.
-- Skip tickets whose `short_description` starts with `Storage Quota Increase request:`.
+- Skip tickets whose `short_description` matches the storage-quota workflow subject family, including `Storage Quota increase`, `Storage Quota increase request: ...`, and `Storage Quota increase - extension`.
+- Skip tickets whose `short_description` matches the ERCAP workflow / announcement subject family, including `ERCAP request` and replies starting with `Re: [Users] ERCAP`.
 - Skip tickets whose `short_description` matches `Renewal of <training-name> Training for Staff`.
 - Skip tickets whose `short_description` includes `Training expiring`.
 - Skip tickets whose `short_description` includes `NERSC Account activation`.

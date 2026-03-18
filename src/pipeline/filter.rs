@@ -12,8 +12,8 @@ fn skip_patterns() -> &'static RegexSet {
         RegexSet::new([
             // is_iris_ticket — prefix
             r"(?i)^Ticket from Iris:",
-            // is_storage_quota_increase — exact or prefix
-            r"(?i)^Storage Quota increase request(:|$)",
+            // is_storage_quota_increase — workflow subjects, including request and extension variants
+            r"(?i)^Storage Quota increase(?: request)?(?:\s*[:\-].*|$)",
             // is_compute_reservation_request + variant — exact (optional space)
             r"(?i)^Compute Reservation\s?Request$",
             // is_perlmutter_access_request — exact
@@ -38,6 +38,9 @@ fn skip_patterns() -> &'static RegexSet {
             r"(?i)^(account reactivation|reactivat(e|ion( of)?|ing) (my )?(nersc )?account\??|please reactivate my account)$",
             // is_close_account_request — exact variants
             r"(?i)^(close (an |my |the )?account( please)?|account clos(e|ing)|closing account)$",
+            // is_ercap_request — workflow subjects and mailing-list announcement replies
+            r"(?i)^ERCAP request(s)?(?:\b|$)",
+            r"(?i)^Re:\s*\[Users\]\s*ERCAP\b",
             // is_realtime_queue_access_request — exact
             r"(?i)^Realtime Queue Access Request$",
             // is_node_hour_increase_request — prefix
@@ -144,4 +147,39 @@ pub fn should_skip_by_config(ticket: &Ticket, filter: &FilterConfig) -> bool {
     }
 
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_skip_ticket;
+
+    #[test]
+    fn skips_storage_quota_extension_subjects() {
+        assert!(should_skip_ticket(&Some(
+            "Storage Quota increase - extension".to_string()
+        )));
+        assert!(should_skip_ticket(&Some(
+            "Storage Quota increase request: project m1234".to_string()
+        )));
+    }
+
+    #[test]
+    fn skips_ercap_request_subjects() {
+        assert!(should_skip_ticket(&Some("ERCAP request".to_string())));
+        assert!(should_skip_ticket(&Some("ERCAP Requests".to_string())));
+        assert!(should_skip_ticket(&Some(
+            "Re: [Users] ERCAP Requests due by 11:59 pm; Join us for ERCAP Office Hours!"
+                .to_string()
+        )));
+    }
+
+    #[test]
+    fn does_not_skip_unrelated_subjects() {
+        assert!(!should_skip_ticket(&Some(
+            "Question about ERCAP award data export".to_string()
+        )));
+        assert!(!should_skip_ticket(&Some(
+            "Storage system performance issue".to_string()
+        )));
+    }
 }

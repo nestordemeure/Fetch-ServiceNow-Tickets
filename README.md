@@ -51,7 +51,7 @@ Ticket JSON files are discovered by `walkdir` (using `d_type` to avoid `stat()` 
 
 3. **Filter (short_description)**: skip the ticket if its `short_description` matches any of:
    - Prefix: `"Ticket from Iris:"`.
-   - Exact match: `"Storage Quota increase request"` or prefix `"Storage Quota Increase request:"`.
+   - Storage quota workflow subjects: `"Storage Quota increase"`, `"Storage Quota increase request"`, and suffixed variants such as `"Storage Quota increase - extension"` or `"Storage Quota increase request: ..."`.
    - Exact match: `"Compute Reservation Request"`.
    - Exact match: `"Perlmutter access request"` or `"Request perlmutter access"`.
    - Exact match: `"GPU nodes access request"` or `"Request access GPU nodes"`.
@@ -64,6 +64,7 @@ Ticket JSON files are discovered by `walkdir` (using `d_type` to avoid `stat()` 
    - Exact match: `"Re: Your NERSC account in the new allocation year"`.
    - Account reactivation variants such as `"Account Reactivation"` and `"reactivate account"`.
    - Account closure variants such as `"close account"` and `"closing account"`.
+   - ERCAP workflow subjects such as `"ERCAP request"`, `"ERCAP Requests"`, and mailing-list replies beginning with `"Re: [Users] ERCAP"`.
    - Exact match: `"Compute ReservationRequest"`.
    - Exact match: `"Realtime Queue Access Request"`.
    - Prefix: `"CPU Node hour increase request for project "` or `"GPU Node hour increase request for project "`.
@@ -100,11 +101,6 @@ Ticket JSON files are discovered by `walkdir` (using `d_type` to avoid `stat()` 
    - **JSON**: write processed messages back into the original JSON structure, apply recursive PII sanitization to the entire JSON tree (structured user fields → `USER_<HMAC>`, email fields → `EMAIL_<HMAC>`, watch-list fields → comma-separated aliases, all other strings → free-text scan for emails, shell logins, NERSC paths, command flags, phones, passwords, and names), serialize with sorted keys and 2-space indentation, and write to `<output_dir>/<relative_input_path>`. Attachment outputs preserve their relative paths from the input directory and are symlinked or copied according to `symlink_attachments`. Text attachments are PII-scanned when PII filtering is enabled (always deterministic for JSON).
 
 ## TODO
-
-- tickets type worth filtering out:
-  - "Storage Quota increase - extension"
-  - "ERCAP request"
-  - "Re: [Users] ERCAP Requests due by 11:59 pm; Join us for ERCAP Office Hours!"
 
 - run clippy over everything
 - anonimization in message authors makes the format harder to read
