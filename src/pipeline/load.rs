@@ -7,9 +7,9 @@ use crate::types::{Attachment, Message, OutputFormat, Ticket};
 
 /// Read a JSON file from disk and parse it into a serde_json::Value.
 pub fn read_json(path: &Path) -> Result<Value, String> {
-    let content =
-        std::fs::read_to_string(path).map_err(|e| format!("{}: read error: {}", path.display(), e))?;
-    serde_json::from_str(&content)
+    let bytes =
+        std::fs::read(path).map_err(|e| format!("{}: read error: {}", path.display(), e))?;
+    serde_json::from_slice(&bytes)
         .map_err(|e| format!("{}: JSON parse error: {}", path.display(), e))
 }
 

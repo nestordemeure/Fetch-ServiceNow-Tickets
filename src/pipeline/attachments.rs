@@ -117,6 +117,8 @@ pub fn write_attachment(
 }
 
 /// Copy or symlink attachment files to the destination directory.
+/// Uses par_iter because attachment processing can be heavy: PII redaction
+/// reads, regex-scans, and rewrites each text file.
 pub fn copy_attachments(
     attachments: &[Attachment],
     dest_dir: &Path,

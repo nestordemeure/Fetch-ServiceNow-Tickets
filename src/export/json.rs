@@ -158,6 +158,8 @@ fn write_attachments_json(
         }
     }
 
+    // par_iter: attachment processing can be heavy (PII redaction reads,
+    // regex-scans, and rewrites each text file).
     work.par_iter().try_for_each(|(src, dst)| {
         attachments::write_attachment(src, dst, "attachment", symlink_attachments, pii)
     })
