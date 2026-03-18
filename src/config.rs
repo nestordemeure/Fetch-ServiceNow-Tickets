@@ -14,28 +14,20 @@ pub fn load_config(path: &str) -> Config {
         }
     };
 
-    let value: toml::Value = match content.parse() {
-        Ok(v) => v,
+    let table: toml::Table = match content.parse() {
+        Ok(t) => t,
         Err(e) => {
             eprintln!("ERROR: {}: parse error: {}", path, e);
             std::process::exit(1);
         }
     };
 
-    let table = match value.as_table() {
-        Some(t) => t,
-        None => {
-            eprintln!("ERROR: {}: expected a TOML table at root", path);
-            std::process::exit(1);
-        }
-    };
-
-    let input_dir = require_str(table, "input_dir", path);
-    let output_dir = require_str(table, "output_dir", path);
-    let output_format_str = require_str(table, "output_format", path);
-    let mode_str = require_str(table, "mode", path);
-    let symlink_attachments = require_bool(table, "symlink_attachments", path);
-    let pii_filter_str = require_str(table, "pii_filter", path);
+    let input_dir = require_str(&table, "input_dir", path);
+    let output_dir = require_str(&table, "output_dir", path);
+    let output_format_str = require_str(&table, "output_format", path);
+    let mode_str = require_str(&table, "mode", path);
+    let symlink_attachments = require_bool(&table, "symlink_attachments", path);
+    let pii_filter_str = require_str(&table, "pii_filter", path);
 
     let output_format = match output_format_str.as_str() {
         "markdown" => OutputFormat::Markdown,
@@ -74,9 +66,9 @@ pub fn load_config(path: &str) -> Config {
         }
     };
 
-    let deterministic_pii = require_bool(table, "deterministic_pii", path);
+    let deterministic_pii = require_bool(&table, "deterministic_pii", path);
 
-    let filter = parse_filter_config(table, path);
+    let filter = parse_filter_config(&table, path);
 
     let input_path = PathBuf::from(&input_dir);
     if !input_path.is_dir() {
