@@ -92,8 +92,9 @@ pub fn export(
                 internal,
             } => {
                 md.push_str("## ");
-                md.push_str(&redact_markdown_field(
+                md.push_str(&redact_markdown_author(
                     author,
+                    ticket.opener.as_deref(),
                     name_matcher,
                     !matches!(config.pii_filter, PiiFilter::None),
                     config.deterministic_pii,
@@ -146,9 +147,29 @@ fn redact_markdown_field(
     redact::redact_text(text, name_matcher, deterministic)
 }
 
+fn redact_markdown_author(
+    author: &str,
+    opener: Option<&str>,
+    name_matcher: &Option<AhoCorasick>,
+    pii_enabled: bool,
+    deterministic: bool,
+) -> String {
+    let redacted = redact_markdown_field(author, name_matcher, pii_enabled, deterministic);
+    if deterministic {
+        return redacted;
+    }
+
+    let name_placeholder = match opener {
+        Some(opener) if opener == author => "[ASKER]",
+        _ => "[NAME]",
+    };
+
+    redacted.replace("[NAME]", name_placeholder)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::redact_markdown_field;
+    use super::{redact_markdown_author, redact_markdown_field};
     use aho_corasick::AhoCorasick;
 
     #[test]
@@ -159,13 +180,50 @@ mod tests {
                 .build(["Adrian Hill"])
                 .unwrap(),
         );
-        let redacted = redact_markdown_field(
+        let redacted = redact_markdown_author(
             "Adrian Hill (adrianhill@berkeley.edu)",
+            Some("Adrian Hill (adrianhill@berkeley.edu)"),
             &matcher,
             true,
             false,
         );
-        assert_eq!(redacted, "[NAME] ([EMAIL])");
+        assert_eq!(redacted, "[ASKER] ([EMAIL])");
+    }
+
+    #[test]
+    fn redacts_non_opener_author_name_in_markdown_heading() {
+        let matcher = Some(
+            AhoCorasick::builder()
+                .ascii_case_insensitive(true)
+                .build(["Adrian Hill"])
+                .unwrap(),
+        );
+        let redacted = redact_markdown_author(
+            "Adrian Hill",
+            Some("Someone Else"),
+            &matcher,
+            true,
+            false,
+        );
+        assert_eq!(redacted, "[NAME]");
+    }
+
+    #[test]
+    fn keeps_deterministic_author_aliases_in_markdown_heading() {
+        let matcher = Some(
+            AhoCorasick::builder()
+                .ascii_case_insensitive(true)
+                .build(["Adrian Hill"])
+                .unwrap(),
+        );
+        let redacted = redact_markdown_author(
+            "Adrian Hill",
+            Some("Adrian Hill"),
+            &matcher,
+            true,
+            true,
+        );
+        assert_eq!(redacted, "USER_1AB03F1C8B");
     }
 
     #[test]

@@ -90,7 +90,7 @@ Ticket JSON files are discovered by `walkdir` (using `d_type` to avoid `stat()` 
 
 5. **Deduplicate**: remove consecutive messages with identical text and same visibility (internal/customer-facing), keeping the first.
 
-6. **PII filtering** (controlled by `pii_filter` and `deterministic_pii`): redact personally identifiable information from message text. Names and usernames (extracted from ticket metadata) are replaced with `[NAME]` via Aho-Corasick dictionary matching. Emails are replaced with `[EMAIL]`, phone numbers with `[PHONE]`, and password values with `[PASSWORD]`. Username-in-context patterns (shell logins like `user@host`, NERSC home paths like `/global/homes/u/username`, and command flags like `-u username`) are also detected and redacted. Three PII modes: `"all"` filters every message, `"asker"` filters only the original ticket opener's messages, `"none"` disables filtering. When `deterministic_pii = true`, names and emails are replaced with HMAC-based pseudonyms (e.g. `USER_A3F2B1C9D0`, `EMAIL_B4E8C2A1F7`) instead of generic placeholders, preserving identity linkage across tickets. **Note:** for JSON output, message-level PII is skipped — the recursive JSON PII step (see below) handles all strings including message text.
+6. **PII filtering** (controlled by `pii_filter` and `deterministic_pii`): redact personally identifiable information from message text. Names and usernames (extracted from ticket metadata) are replaced with `[NAME]` via Aho-Corasick dictionary matching. Emails are replaced with `[EMAIL]`, phone numbers with `[PHONE]`, and password values with `[PASSWORD]`. Username-in-context patterns (shell logins like `user@host`, NERSC home paths like `/global/homes/u/username`, and command flags like `-u username`) are also detected and redacted. Three PII modes: `"all"` filters every message, `"asker"` filters only the original ticket opener's messages, `"none"` disables filtering. When `deterministic_pii = true`, names and emails are replaced with HMAC-based pseudonyms (e.g. `USER_A3F2B1C9D0`, `EMAIL_B4E8C2A1F7`) instead of generic placeholders, preserving identity linkage across tickets. In markdown message headings, when `deterministic_pii = false`, the original ticket opener's author label is rendered as `[ASKER]` while other redacted author names remain `[NAME]`. **Note:** for JSON output, message-level PII is skipped — the recursive JSON PII step (see below) handles all strings including message text.
 
 7. **Filter (post-extraction)**: skip the ticket if: zero messages remain, all messages are from bots (`autoticketing`, `pm-node-info-bot`, `system`), or exactly one message with no attachments.
 
@@ -103,7 +103,6 @@ Ticket JSON files are discovered by `walkdir` (using `d_type` to avoid `stat()` 
 ## TODO
 
 - run clippy over everything
-- anonimization in message authors makes the format harder to read
 - review all texts (readme, claude, specs)
 - Import tickets directly from the ServiceNow API
   - Add scron script to refresh tickets regularly

@@ -288,6 +288,8 @@ Redaction is applied in order:
 4. **Phone numbers**: conservative pattern requiring country codes, parenthesized area codes, or explicit 3-3-4 digit grouping with separators. Avoids matching dates or node IDs. Replaced with `[PHONE]`.
 5. **Names**: Aho-Corasick case-insensitive dictionary match against the ticket's `known_pii` list. All matches replaced with `[NAME]` (or `USER_<HMAC>` in deterministic mode).
 
+For markdown message headings only, when `deterministic_pii = false`, the opener's redacted author label is rendered as `[ASKER]` instead of `[NAME]`. Non-opener redacted author names remain `[NAME]`.
+
 #### 4.5.3 Deterministic Pseudonymization
 
 When `deterministic_pii = true`, names and emails are replaced with HMAC-SHA256-based pseudonyms instead of generic placeholders:
