@@ -102,7 +102,6 @@ Ticket JSON files are discovered by `walkdir` (using `d_type` to avoid `stat()` 
 
 ## TODO
 
-- run clippy over everything
 - review all texts (readme, claude, specs)
 - Import tickets directly from the ServiceNow API
   - Add scron script to refresh tickets regularly
