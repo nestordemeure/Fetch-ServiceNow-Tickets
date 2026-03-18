@@ -1,8 +1,69 @@
 use std::sync::OnceLock;
 
-use regex::Regex;
+use regex::RegexSet;
 
 use crate::types::{FilterConfig, Message, Ticket};
+
+/// Lazily-compiled RegexSet for all short_description skip patterns.
+/// All patterns are case-insensitive. Compiled once, matched in a single pass.
+fn skip_patterns() -> &'static RegexSet {
+    static SET: OnceLock<RegexSet> = OnceLock::new();
+    SET.get_or_init(|| {
+        RegexSet::new([
+            // is_iris_ticket — prefix
+            r"(?i)^Ticket from Iris:",
+            // is_storage_quota_increase — exact or prefix
+            r"(?i)^Storage Quota increase request(:|$)",
+            // is_compute_reservation_request + variant — exact (optional space)
+            r"(?i)^Compute Reservation\s?Request$",
+            // is_perlmutter_access_request — exact
+            r"(?i)^(Perlmutter access request|Request perlmutter access)$",
+            // is_gpu_nodes_access_request — exact
+            r"(?i)^(GPU nodes access request|Request access GPU nodes)$",
+            // is_vasp_license_confirmation_request — exact
+            r"(?i)^VASP license Confirmation Request to Access NERSC Provided VASP Binaries$",
+            // is_collaboration_account_request — exact
+            r"(?i)^(Collaboration account request|Request (a )?collaboration account)$",
+            // is_training_accounts_request — exact
+            r"(?i)^Training Accounts Request$",
+            // is_nersc_ip_request — exact
+            r"(?i)^NERSC IP REQUEST$",
+            // is_nersc_cname_request — exact
+            r"(?i)^NERSC CNAME REQUEST$",
+            // is_account_request_being_processed — exact
+            r"(?i)^Re: Your NERSC account request is being processed$",
+            // is_account_in_new_allocation_year — exact
+            r"(?i)^Re: Your NERSC account in the new allocation year$",
+            // is_account_reactivation_request — exact variants
+            r"(?i)^(account reactivation|reactivat(e|ion( of)?|ing) (my )?(nersc )?account\??|please reactivate my account)$",
+            // is_close_account_request — exact variants
+            r"(?i)^(close (an |my |the )?account( please)?|account clos(e|ing)|closing account)$",
+            // is_realtime_queue_access_request — exact
+            r"(?i)^Realtime Queue Access Request$",
+            // is_node_hour_increase_request — prefix
+            r"(?i)^(CPU|GPU) Node hour increase request for project ",
+            // is_travel_laptop_request — substring
+            r"(?i)travel laptop",
+            // is_daily_rps_dynamic_screening_alert — prefix
+            r"(?i)^Daily RPS Dynamic Screening Alert",
+            // is_slurm_iris_failure — prefix
+            r"(?i)^Failure to run slurm_iris\.py on ",
+            // is_high_load_warning — prefix
+            r"(?i)^\[response required\] high load on ",
+            // is_touching_scratch_warning — exact
+            r"(?i)^\[response required\] touching files in your scratch directory$",
+            // is_running_watch_warning — prefix + contains
+            r"(?i)^\[response required\] .*running watch on nersc systems",
+            // is_training_renewal — regex
+            r"(?i)^Renewal of .+ Training for Staff$",
+            // is_training_expiring — substring
+            r"(?i)training expiring",
+            // is_nersc_account_activation — substring
+            r"(?i)nersc account activation",
+        ])
+        .expect("skip_patterns: invalid regex")
+    })
+}
 
 /// Returns true if the ticket should be skipped based on its short_description.
 pub fn should_skip_ticket(short_description: &Option<String>) -> bool {
@@ -10,33 +71,7 @@ pub fn should_skip_ticket(short_description: &Option<String>) -> bool {
         Some(s) => s,
         None => return false,
     };
-
-    is_iris_ticket(desc)
-        || is_storage_quota_increase(desc)
-        || is_compute_reservation_request(desc)
-        || is_perlmutter_access_request(desc)
-        || is_gpu_nodes_access_request(desc)
-        || is_vasp_license_confirmation_request(desc)
-        || is_collaboration_account_request(desc)
-        || is_training_accounts_request(desc)
-        || is_nersc_ip_request(desc)
-        || is_nersc_cname_request(desc)
-        || is_account_request_being_processed(desc)
-        || is_account_in_new_allocation_year(desc)
-        || is_account_reactivation_request(desc)
-        || is_close_account_request(desc)
-        || is_compute_reservation_request_variant(desc)
-        || is_realtime_queue_access_request(desc)
-        || is_node_hour_increase_request(desc)
-        || is_travel_laptop_request(desc)
-        || is_daily_rps_dynamic_screening_alert(desc)
-        || is_slurm_iris_failure(desc)
-        || is_high_load_warning(desc)
-        || is_touching_scratch_warning(desc)
-        || is_running_watch_warning(desc)
-        || is_training_renewal(desc)
-        || is_training_expiring(desc)
-        || is_nersc_account_activation(desc)
+    skip_patterns().is_match(desc)
 }
 
 /// Returns true if all messages are from bot/system authors only.
@@ -109,177 +144,4 @@ pub fn should_skip_by_config(ticket: &Ticket, filter: &FilterConfig) -> bool {
     }
 
     false
-}
-
-// Prefix match (case-insensitive): "Ticket from Iris:"
-fn is_iris_ticket(desc: &str) -> bool {
-    has_prefix_ignore_ascii_case(desc, "Ticket from Iris:")
-}
-
-// Prefix/exact match (case-insensitive): "Storage Quota Increase request:"
-fn is_storage_quota_increase(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("Storage Quota increase request")
-        || has_prefix_ignore_ascii_case(desc, "Storage Quota Increase request:")
-}
-
-// Exact match (case-insensitive): "Compute Reservation Request"
-fn is_compute_reservation_request(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("Compute Reservation Request")
-}
-
-// Exact match (case-insensitive): "Perlmutter access request" / "Request perlmutter access"
-fn is_perlmutter_access_request(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("Perlmutter access request")
-        || desc.eq_ignore_ascii_case("Request perlmutter access")
-}
-
-// Exact match (case-insensitive): "GPU nodes access request" / "Request access GPU nodes"
-fn is_gpu_nodes_access_request(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("GPU nodes access request")
-        || desc.eq_ignore_ascii_case("Request access GPU nodes")
-}
-
-// Exact match (case-insensitive): VASP license confirmation workflow requests
-fn is_vasp_license_confirmation_request(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("VASP license Confirmation Request to Access NERSC Provided VASP Binaries")
-}
-
-// Exact match (case-insensitive): collaboration account request workflows
-fn is_collaboration_account_request(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("Collaboration account request")
-        || desc.eq_ignore_ascii_case("Request collaboration account")
-        || desc.eq_ignore_ascii_case("Request a collaboration account")
-}
-
-// Exact match (case-insensitive): "Training Accounts Request"
-fn is_training_accounts_request(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("Training Accounts Request")
-}
-
-// Exact match (case-insensitive): "NERSC IP REQUEST"
-fn is_nersc_ip_request(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("NERSC IP REQUEST")
-}
-
-// Exact match (case-insensitive): "NERSC CNAME REQUEST"
-fn is_nersc_cname_request(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("NERSC CNAME REQUEST")
-}
-
-// Exact match (case-insensitive): account onboarding/vetting status workflow
-fn is_account_request_being_processed(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("Re: Your NERSC account request is being processed")
-}
-
-// Exact match (case-insensitive): new allocation year account-status workflow
-fn is_account_in_new_allocation_year(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("Re: Your NERSC account in the new allocation year")
-        || desc.eq_ignore_ascii_case("RE: Your NERSC account in the new allocation year")
-}
-
-// Exact match (case-insensitive): account reactivation workflows
-fn is_account_reactivation_request(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("Account Reactivation")
-        || desc.eq_ignore_ascii_case("account reactivation")
-        || desc.eq_ignore_ascii_case("reactivation account")
-        || desc.eq_ignore_ascii_case("reactivate account")
-        || desc.eq_ignore_ascii_case("Reactivate my account")
-        || desc.eq_ignore_ascii_case("please reactivate my account")
-        || desc.eq_ignore_ascii_case("Reactivating NERSC account")
-        || desc.eq_ignore_ascii_case("reactivating my nersc account")
-        || desc.eq_ignore_ascii_case("reactivating my account")
-        || desc.eq_ignore_ascii_case("Reactivation of account")
-        || desc.eq_ignore_ascii_case("Reactivation of Account")
-        || desc.eq_ignore_ascii_case("Reactivate Account")
-        || desc.eq_ignore_ascii_case("Reactivate account")
-        || desc.eq_ignore_ascii_case("reactivate account?")
-        || desc.eq_ignore_ascii_case("Reactivating account?")
-}
-
-// Exact match (case-insensitive): account closure workflows
-fn is_close_account_request(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("close account")
-        || desc.eq_ignore_ascii_case("Close account")
-        || desc.eq_ignore_ascii_case("Close an account")
-        || desc.eq_ignore_ascii_case("Close my account please")
-        || desc.eq_ignore_ascii_case("Close the account")
-        || desc.eq_ignore_ascii_case("Account Close")
-        || desc.eq_ignore_ascii_case("account closing")
-        || desc.eq_ignore_ascii_case("Account closing")
-        || desc.eq_ignore_ascii_case("closing account")
-        || desc.eq_ignore_ascii_case("Closing account")
-}
-
-// Exact match (case-insensitive): "Compute ReservationRequest"
-fn is_compute_reservation_request_variant(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("Compute ReservationRequest")
-}
-
-// Exact match (case-insensitive): "Realtime Queue Access Request"
-fn is_realtime_queue_access_request(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("Realtime Queue Access Request")
-}
-
-// Prefix match (case-insensitive): CPU/GPU node-hour increase request workflow subjects
-fn is_node_hour_increase_request(desc: &str) -> bool {
-    has_prefix_ignore_ascii_case(desc, "CPU Node hour increase request for project ")
-        || has_prefix_ignore_ascii_case(desc, "GPU Node hour increase request for project ")
-}
-
-// Substring match (case-insensitive): travel laptop admin workflows
-fn is_travel_laptop_request(desc: &str) -> bool {
-    desc.to_ascii_lowercase().contains("travel laptop")
-}
-
-// Prefix match (case-insensitive): "Daily RPS Dynamic Screening Alert ..."
-fn is_daily_rps_dynamic_screening_alert(desc: &str) -> bool {
-    has_prefix_ignore_ascii_case(desc, "Daily RPS Dynamic Screening Alert")
-}
-
-// Prefix match (case-insensitive): "Failure to run slurm_iris.py on ..."
-fn is_slurm_iris_failure(desc: &str) -> bool {
-    has_prefix_ignore_ascii_case(desc, "Failure to run slurm_iris.py on ")
-}
-
-// Prefix match (case-insensitive): "[response required] high load on ..."
-fn is_high_load_warning(desc: &str) -> bool {
-    has_prefix_ignore_ascii_case(desc, "[response required] high load on ")
-}
-
-// Exact match (case-insensitive): scratch touch policy warning
-fn is_touching_scratch_warning(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("[response required] touching files in your scratch directory")
-}
-
-// Exact/prefix match (case-insensitive): watch-on-login-node policy warnings
-fn is_running_watch_warning(desc: &str) -> bool {
-    desc.eq_ignore_ascii_case("[response required] running watch on NERSC systems")
-        || has_prefix_ignore_ascii_case(desc, "[response required] ")
-            && desc.to_ascii_lowercase().contains(" running watch on nersc systems")
-}
-
-// Regex match (case-insensitive): ^Renewal of .+ Training for Staff$
-fn is_training_renewal(desc: &str) -> bool {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| {
-        Regex::new(r"(?i)^Renewal of .+ Training for Staff$").unwrap()
-    });
-    re.is_match(desc)
-}
-
-// Substring match (case-insensitive): contains "Training expiring"
-fn is_training_expiring(desc: &str) -> bool {
-    desc.to_ascii_lowercase().contains("training expiring")
-}
-
-// Substring match (case-insensitive): contains "NERSC Account activation"
-fn is_nersc_account_activation(desc: &str) -> bool {
-    let lower = desc.to_ascii_lowercase();
-    lower.contains("nersc account activation")
-}
-
-fn has_prefix_ignore_ascii_case(s: &str, prefix: &str) -> bool {
-    s.len() >= prefix.len()
-        && s.get(..prefix.len())
-            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
 }
