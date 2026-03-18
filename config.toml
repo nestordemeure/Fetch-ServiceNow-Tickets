@@ -19,17 +19,20 @@ mode = "replace"
 # When false, attachment files are copied into the output tree.
 symlink_attachments = true
 
-# PII filtering: redact names, usernames, emails, phone numbers, and passwords
-# from message text, replacing them with placeholders like [NAME], [EMAIL], etc.
+# PII filtering: redact names, emails, phones, passwords, Zoom meeting details,
+# shell logins (user@host), NERSC paths, and command user flags from message text.
+# Replaced with placeholders like [NAME], [EMAIL], [PHONE], [ZOOM], etc.
 #   "all"   - filter PII from all messages (asker and staff).
 #   "asker" - filter PII only from the original ticket opener's messages.
 #   "none"  - no PII filtering.
+# Note: JSON output always applies recursive PII sanitization regardless of this setting.
 pii_filter = "all"
 
 # When true, PII replacements use deterministic HMAC-based aliases (e.g. USER_A3F2B1C9D0)
 # instead of generic placeholders like [NAME], [EMAIL]. Same input always produces
 # the same alias, preserving identity linkage across tickets.
-# Requires pii_filter to be "all" or "asker" to have any effect.
+# Only affects markdown output — JSON output is always deterministic.
+# Requires pii_filter to be "all" or "asker" to have any effect on markdown.
 deterministic_pii = false
 
 [filter]
@@ -42,7 +45,7 @@ min_created_date = ""
 #                "Email", "User Web Interface", "Phone", "In Person"
 exclude_contact_types = ["Staff Initiated", "System Alert Auto Generated"]
 
-# Only keep tickets with these close codes.
+# Only keep tickets with these close codes (case-sensitive).
 # Leave empty to accept all close codes.
 # Common values: "Solved (Permanently)", "Resolved by Requester", "Resolved by Support"
 include_close_codes = []
