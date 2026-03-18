@@ -325,14 +325,15 @@ The JSON output format preserves the original ServiceNow JSON structure with nor
 
 ## 5. Parallelism
 
-- Use **Rayon** for data-parallel iteration over the list of discovered JSON files.
+- A dedicated walker thread discovers JSON files and streams their paths through a channel. Rayon workers consume from the channel via `par_bridge()`, so discovery and processing overlap — no upfront collection pass is needed.
+- The walker uses `DirEntry::file_type()` instead of `path.is_dir()` to avoid per-entry `stat()` calls, which is critical on networked filesystems (Lustre, GPFS, NFS).
 - Each ticket is fully independent: load, filter, normalize, dedup, build timeline, write output. No shared mutable state between tickets.
 - The pipeline is CPU-bound for normalization and I/O-bound for reads and writes. Rayon's work-stealing scheduler handles both well enough given the volume and the availability of many cores. If I/O contention becomes a bottleneck (unlikely on a parallel filesystem like GPFS/Lustre), a hybrid Rayon + async-I/O approach can be explored later.
 
 ## 6. Update Mode
 
 When `mode = "update"`:
-1. Walk the input directory to collect all JSON file paths.
+1. The walker thread streams JSON file paths to Rayon workers as they are discovered.
 2. **Before loading/processing each file**, do a lightweight pre-parse: read only `metadata.incident_number` and `incident_fields.opened_at` to compute the expected output path (markdown: `<output_dir>/YYYY/MM/INC########/ticket.md`; JSON: `<output_dir>/<relative_input_path>`).
 3. Compare the input file's `mtime` against the output file's `mtime`.
 4. If the output file does not exist or the input is newer, proceed with full loading and processing. Otherwise skip the file entirely — no further I/O or CPU work.

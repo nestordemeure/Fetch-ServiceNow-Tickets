@@ -35,7 +35,7 @@ cargo run --release
 
 ## How It Works
 
-All tickets are discovered and processed in parallel using Rayon:
+Ticket JSON files are discovered and processed in parallel — a walker thread streams file paths into Rayon workers via a channel, so discovery and processing overlap with no upfront collection pass:
 
 0. **Freshness check**: in `update` mode, compare the input JSON's modification time against its output file. Skip the ticket entirely if the output is already up-to-date. In `replace` mode, all tickets are processed unconditionally.
 
@@ -80,5 +80,7 @@ All tickets are discovered and processed in parallel using Rayon:
 
 ## TODO
 
+- anonymize text attachements
+- review all texts (readme, claude, specs)
 - Import tickets directly from the ServiceNow API
   - Add scron script to refresh tickets regularly
