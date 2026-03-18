@@ -172,15 +172,6 @@ fn parse_attachment(att: &Value, input_root: &Path, ctx: &str) -> Result<Attachm
         .ok_or_else(|| format!("{}: missing 'local_path'", ctx))?;
     let local_path = input_root.join(local_path_str);
 
-    if !local_path.exists() {
-        return Err(format!(
-            "{}: attachment file not found: {} (resolved to {})",
-            ctx,
-            local_path_str,
-            local_path.display()
-        ));
-    }
-
     Ok(Attachment {
         original_name: file_name,
         resolved_name: String::new(), // set later by attachments module

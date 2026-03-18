@@ -22,6 +22,11 @@ output_format = "markdown"
 #               than the corresponding output file (or has no output yet).
 mode = "update"
 
+# Attachment handling:
+#   true  - write symbolic links into the output tree
+#   false - copy attachment files into the output tree
+symlink_attachments = true
+
 # PII filtering:
 #   "all"   - filter PII from all messages (staff and asker).
 #   "asker" - filter PII only from the original ticket opener's messages.
@@ -280,15 +285,22 @@ Consecutive attachment entries are merged into a single `AttachmentGroup`.
 
 - **Sanitize filename**: replace `/` and `\` with `_`, remove non-alphanumeric characters (except `.`, `_`, `-`, space), strip leading/trailing spaces and dots, fall back to `"attachment"` if empty.
 - **Ensure uniqueness**: append `_2`, `_3`, etc. on collision. Reserved filenames (e.g. `ticket.md` for the markdown format) are defined by the exporter.
-- **Write to disk**: copy the file from `local_path` (resolved relative to `input_dir`) into the ticket's output directory. Hard error if the source file does not exist.
+- **Write to disk**: write the file from `local_path` (resolved relative to `input_dir`) into the ticket's output directory, either as a symbolic link or as a copied file depending on `symlink_attachments`. Failures are surfaced as hard errors by the exporter.
 
 ### 4.8 Export (`export/`)
 
-The export module dispatches on `output_format` from the config. Each format controls its own output directory layout, file naming, and rendering. The pipeline provides a processed `Ticket` with a built timeline; the exporter decides how to write it.
+The export module dispatches on `output_format` from the config. Each format controls its own output directory layout, file naming, rendering, and attachment-copy order. The pipeline provides a processed `Ticket`; the exporter decides how to write it.
 
 #### 4.8.1 Markdown (`export/markdown.rs`)
 
 The markdown output format (directory layout, `ticket.md` structure, heading rules, attachment listing) is fully specified in [`ticket_format_specification.md`](./ticket_format_specification.md). The export module implements that specification exactly.
+
+**Export steps:**
+1. Create the ticket output directory.
+2. Resolve attachment filenames (sanitize + uniquify, reserving `ticket.md`).
+3. Build the ticket timeline from messages and attachment metadata.
+4. Render and write `ticket.md`.
+5. Write attachment outputs into the ticket directory. When `symlink_attachments = true`, attachments are written as symbolic links; otherwise they are copied. If an attachment write fails, `ticket.md` is left in place as partial output.
 
 #### 4.8.2 JSON (`export/json.rs`)
 
@@ -306,7 +318,7 @@ The JSON output format preserves the original ServiceNow JSON structure with nor
    - **Email fields** (`email`, `email_address`, `u_email_watchlist`, `u_email`) → `EMAIL_<HMAC10>`
    - **Watch-list fields** (`u_itil_watch_list`, `u_user_watchlist`, `u_username_watchlist`, `watch_list`) → comma-separated `USER_<HMAC10>` aliases
    - **All other strings** → free-text scan for emails, shell logins, NERSC paths, command user flags, phones, passwords, and Aho-Corasick name dictionary matches
-3. **Attachment copying**: files are copied from `input_dir` to `output_dir` preserving their relative paths (the `local_path` field in the JSON remains valid relative to the output root).
+3. **Attachment output**: files are written from `input_dir` to `output_dir` preserving their relative paths (the `local_path` field in the JSON remains valid relative to the output root). Depending on `symlink_attachments`, each output is either a symbolic link or a copied file.
 4. **Serialization**: sorted keys, 2-space indentation, matching Python's `json.dump(indent=2, sort_keys=True)`.
 
 **Output path**: preserves the input file's relative path under `output_dir` (e.g. `output_dir/servicenow_incidents/INC022/90/24.json`).

@@ -33,7 +33,13 @@ pub fn export_ticket(
     match config.output_format {
         OutputFormat::Markdown => markdown::export(config, ticket),
         OutputFormat::Json => {
-            json::export(ticket, json_input_path, &config.input_dir, &config.output_dir)
+            json::export(
+                ticket,
+                json_input_path,
+                &config.input_dir,
+                &config.output_dir,
+                config.symlink_attachments,
+            )
         }
     }
 }

@@ -42,9 +42,6 @@ pub fn export(config: &Config, ticket: &mut Ticket) -> Result<(), String> {
     let reserved: HashSet<String> = ["ticket.md".to_string()].into_iter().collect();
     attachments::resolve_filenames(&mut ticket.attachments, &reserved);
 
-    // Copy attachment files
-    attachments::copy_attachments(&ticket.attachments, &ticket_dir)?;
-
     // Build timeline
     let timeline = timeline::build_timeline(
         std::mem::take(&mut ticket.messages),
@@ -107,6 +104,14 @@ pub fn export(config: &Config, ticket: &mut Ticket) -> Result<(), String> {
     std::fs::write(&ticket_path, &md).map_err(|e| {
         format!("cannot write {}: {}", ticket_path.display(), e)
     })?;
+
+    // Copy attachment files after writing ticket.md. If a copy fails, the ticket
+    // markdown is left in place as partial output.
+    attachments::copy_attachments(
+        &ticket.attachments,
+        &ticket_dir,
+        config.symlink_attachments,
+    )?;
 
     Ok(())
 }

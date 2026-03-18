@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use aho_corasick::AhoCorasick;
 use serde_json::Value;
 
-use crate::pipeline::pii_json;
+use crate::pipeline::{attachments, pii_json};
 use crate::types::Ticket;
 
 /// Compute the output path for a ticket's JSON file.
@@ -17,7 +17,13 @@ pub fn output_path(json_input_path: &Path, input_dir: &Path, output_dir: &Path) 
 }
 
 /// Export a ticket as sanitized JSON.
-pub fn export(ticket: &mut Ticket, json_input_path: &Path, input_dir: &Path, output_dir: &Path) -> Result<(), String> {
+pub fn export(
+    ticket: &mut Ticket,
+    json_input_path: &Path,
+    input_dir: &Path,
+    output_dir: &Path,
+    symlink_attachments: bool,
+) -> Result<(), String> {
     let raw_json = ticket
         .raw_json
         .take()
@@ -41,8 +47,8 @@ pub fn export(ticket: &mut Ticket, json_input_path: &Path, input_dir: &Path, out
     // Step 3: Recursive PII sanitization on the entire JSON tree
     pii_json::sanitize_value(&mut data, &name_matcher);
 
-    // Step 4: Copy attachment files and update local_path references
-    copy_attachments_json(&data, input_dir, output_dir)?;
+    // Step 4: Copy or symlink attachment files, preserving relative paths
+    write_attachments_json(&data, input_dir, output_dir, symlink_attachments)?;
 
     // Step 5: Serialize with sorted keys + pretty-print
     let output = serialize_sorted(&data);
@@ -126,8 +132,13 @@ fn write_back_messages(data: &mut Value, messages: &[crate::types::Message]) {
     }
 }
 
-/// Copy attachment files from input to output, preserving relative paths.
-fn copy_attachments_json(data: &Value, input_dir: &Path, output_dir: &Path) -> Result<(), String> {
+/// Copy or symlink attachment files from input to output, preserving relative paths.
+fn write_attachments_json(
+    data: &Value,
+    input_dir: &Path,
+    output_dir: &Path,
+    symlink_attachments: bool,
+) -> Result<(), String> {
     if let Some(atts) = data.get("attachments").and_then(|a| a.as_array()) {
         for att in atts {
             let local_path_str = match att.get("local_path").and_then(|v| v.as_str()) {
@@ -137,12 +148,6 @@ fn copy_attachments_json(data: &Value, input_dir: &Path, output_dir: &Path) -> R
 
             let src = input_dir.join(local_path_str);
             let dst = output_dir.join(local_path_str);
-
-            if !src.exists() {
-                // Attachment file missing — skip (load.rs already validates in markdown mode,
-                // but PII sanitization may have altered the path string; best effort here)
-                continue;
-            }
 
             if let Some(parent) = dst.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| {
@@ -154,16 +159,10 @@ fn copy_attachments_json(data: &Value, input_dir: &Path, output_dir: &Path) -> R
                 })?;
             }
 
-            std::fs::copy(&src, &dst).map_err(|e| {
-                format!(
-                    "failed to copy attachment from {} to {}: {}",
-                    src.display(),
-                    dst.display(),
-                    e
-                )
-            })?;
+            attachments::write_attachment(&src, &dst, "attachment", symlink_attachments)?;
         }
     }
+
     Ok(())
 }
 

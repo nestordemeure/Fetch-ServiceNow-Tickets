@@ -13,6 +13,7 @@ input_dir = "/path/to/servicenow/json/exports"
 output_dir = "./tickets"
 output_format = "markdown"  # or "json"
 mode = "update"
+symlink_attachments = true
 pii_filter = "all"
 deterministic_pii = false
 
@@ -71,11 +72,11 @@ All tickets are discovered and processed in parallel using Rayon:
 
 7. **Filter (post-extraction)**: skip the ticket if: zero messages remain, all messages are from bots (`autoticketing`, `pm-node-info-bot`, `system`), or exactly one message with no attachments.
 
-8. **Build timeline**: merge messages and attachments into chronological order (sorted by timestamp, messages before attachments at equal timestamps, consecutive attachments grouped). Copy attachment files from `local_path` (resolved relative to `input_dir`), sanitizing filenames for uniqueness.
+8. **Build timeline**: merge messages and attachments into chronological order (sorted by timestamp, messages before attachments at equal timestamps, consecutive attachments grouped). Attachment filenames are sanitized for uniqueness before export.
 
 9. **Export**: render the timeline in the configured output format and write to disk:
-   - **Markdown**: write to `<output_dir>/YYYY/MM/INC########/ticket.md` alongside any attachment files.
-   - **JSON**: write processed messages back into the original JSON structure, apply recursive PII sanitization to the entire JSON tree (structured user fields → `USER_<HMAC>`, email fields → `EMAIL_<HMAC>`, watch-list fields → comma-separated aliases, all other strings → free-text scan for emails, shell logins, NERSC paths, command flags, phones, passwords, and names), serialize with sorted keys and 2-space indentation, and write to `<output_dir>/<relative_input_path>`. Attachment files are copied preserving their relative paths from the input directory.
+   - **Markdown**: write `<output_dir>/YYYY/MM/INC########/ticket.md`, then write any attachment outputs alongside it. When `symlink_attachments = true`, those outputs are symbolic links to the source files; when `false`, they are copied files. If an attachment write fails, the markdown file is left in place as partial output.
+   - **JSON**: write processed messages back into the original JSON structure, apply recursive PII sanitization to the entire JSON tree (structured user fields → `USER_<HMAC>`, email fields → `EMAIL_<HMAC>`, watch-list fields → comma-separated aliases, all other strings → free-text scan for emails, shell logins, NERSC paths, command flags, phones, passwords, and names), serialize with sorted keys and 2-space indentation, and write to `<output_dir>/<relative_input_path>`. Attachment outputs preserve their relative paths from the input directory and are symlinked or copied according to `symlink_attachments`.
 
 ## TODO
 

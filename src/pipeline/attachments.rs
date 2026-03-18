@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use rayon::prelude::*;
+
 use crate::types::Attachment;
 
 /// Sanitize a filename for filesystem safety.
@@ -57,19 +59,61 @@ pub fn resolve_filenames(attachments: &mut [Attachment], reserved: &HashSet<Stri
     }
 }
 
-/// Copy attachment files to the destination directory.
-pub fn copy_attachments(attachments: &[Attachment], dest_dir: &Path) -> Result<(), String> {
-    for att in attachments {
-        let dest_path = dest_dir.join(&att.resolved_name);
-        std::fs::copy(&att.local_path, &dest_path).map_err(|e| {
+pub fn write_attachment(
+    src: &Path,
+    dest_path: &Path,
+    description: &str,
+    symlink_attachments: bool,
+) -> Result<(), String> {
+    if std::fs::symlink_metadata(dest_path).is_ok() {
+        std::fs::remove_file(dest_path).map_err(|e| {
             format!(
-                "failed to copy attachment '{}' from {} to {}: {}",
-                att.original_name,
-                att.local_path.display(),
+                "failed to remove existing output {} at {}: {}",
+                description,
                 dest_path.display(),
                 e
             )
         })?;
     }
-    Ok(())
+
+    if symlink_attachments {
+        std::os::unix::fs::symlink(src, dest_path).map_err(|e| {
+            format!(
+                "failed to symlink {} from {} to {}: {}",
+                description,
+                src.display(),
+                dest_path.display(),
+                e
+            )
+        })
+    } else {
+        std::fs::copy(src, dest_path)
+            .map(|_| ())
+            .map_err(|e| {
+                format!(
+                    "failed to copy {} from {} to {}: {}",
+                    description,
+                    src.display(),
+                    dest_path.display(),
+                    e
+                )
+            })
+    }
+}
+
+/// Copy or symlink attachment files to the destination directory.
+pub fn copy_attachments(
+    attachments: &[Attachment],
+    dest_dir: &Path,
+    symlink_attachments: bool,
+) -> Result<(), String> {
+    attachments.par_iter().try_for_each(|att| {
+        let dest_path = dest_dir.join(&att.resolved_name);
+        write_attachment(
+            &att.local_path,
+            &dest_path,
+            &format!("attachment '{}'", att.original_name),
+            symlink_attachments,
+        )
+    })
 }

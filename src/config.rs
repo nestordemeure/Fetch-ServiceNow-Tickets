@@ -34,6 +34,7 @@ pub fn load_config(path: &str) -> Config {
     let output_dir = require_str(table, "output_dir", path);
     let output_format_str = require_str(table, "output_format", path);
     let mode_str = require_str(table, "mode", path);
+    let symlink_attachments = require_bool(table, "symlink_attachments", path);
     let pii_filter_str = require_str(table, "pii_filter", path);
 
     let output_format = match output_format_str.as_str() {
@@ -91,6 +92,7 @@ pub fn load_config(path: &str) -> Config {
         output_dir: PathBuf::from(output_dir),
         output_format,
         mode,
+        symlink_attachments,
         pii_filter,
         deterministic_pii,
         filter,

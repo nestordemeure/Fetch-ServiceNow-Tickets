@@ -8,6 +8,7 @@ pub struct Config {
     pub output_dir: PathBuf,
     pub output_format: OutputFormat,
     pub mode: Mode,
+    pub symlink_attachments: bool,
     pub pii_filter: PiiFilter,
     pub deterministic_pii: bool,
     pub filter: FilterConfig,

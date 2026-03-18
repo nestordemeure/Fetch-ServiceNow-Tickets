@@ -1,5 +1,5 @@
 # Path to the directory containing raw ServiceNow incident JSON files.
-input_dir = "/home/nestor/Documents/work/NERSC/tickets/demo_ticket_stash/pengfei"
+input_dir = "/home/nestor/Documents/work/NERSC/tickets/demo_ticket_stash/steve"
 
 # Path to the directory where processed tickets are written.
 output_dir = "./tickets"
@@ -14,6 +14,10 @@ output_format = "markdown"
 #   "update"  - only re-process tickets whose source JSON is newer
 #               than the corresponding output file (or has no output yet).
 mode = "replace"
+
+# When true, attachment outputs are symbolic links to the source files.
+# When false, attachment files are copied into the output tree.
+symlink_attachments = true
 
 # PII filtering: redact names, usernames, emails, phone numbers, and passwords
 # from message text, replacing them with placeholders like [NAME], [EMAIL], etc.
