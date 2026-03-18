@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::OnceLock;
 
 use aho_corasick::AhoCorasick;
@@ -50,11 +51,12 @@ pub fn filter_pii(ticket: &mut Ticket, pii_filter: &PiiFilter, deterministic: bo
 
 /// Redact PII from a single text string.
 /// Applied in order: passwords, emails, username-in-context patterns, phones, then names.
+/// Uses Cow<str> throughout to avoid allocations when regexes don't match.
 fn redact_text(text: &str, name_matcher: &Option<AhoCorasick>, deterministic: bool) -> String {
-    let text = redact_passwords(text);
-    let text = redact_emails(&text, deterministic);
-    let text = redact_username_contexts(&text, deterministic);
-    let text = redact_phones(&text);
+    let text: Cow<str> = redact_passwords(text);
+    let text: Cow<str> = redact_emails(&text, deterministic);
+    let text: Cow<str> = redact_username_contexts(&text, deterministic);
+    let text: Cow<str> = redact_phones(&text);
     redact_names(&text, name_matcher, deterministic)
 }
 
@@ -78,15 +80,14 @@ pub(crate) fn email_regex() -> &'static Regex {
     })
 }
 
-fn redact_emails(text: &str, deterministic: bool) -> String {
+fn redact_emails<'a>(text: &'a str, deterministic: bool) -> Cow<'a, str> {
     if deterministic {
         email_regex()
             .replace_all(text, |caps: &regex::Captures| {
                 format!("EMAIL_{}", hmac_tag(&caps[0]))
             })
-            .into_owned()
     } else {
-        email_regex().replace_all(text, "[EMAIL]").into_owned()
+        email_regex().replace_all(text, "[EMAIL]")
     }
 }
 
@@ -114,8 +115,8 @@ pub(crate) fn phone_regex() -> &'static Regex {
     })
 }
 
-fn redact_phones(text: &str) -> String {
-    phone_regex().replace_all(text, "[PHONE]").into_owned()
+fn redact_phones<'a>(text: &'a str) -> Cow<'a, str> {
+    phone_regex().replace_all(text, "[PHONE]")
 }
 
 // ── Passwords ───────────────────────────────────────────────────────────────
@@ -127,10 +128,8 @@ pub(crate) fn password_regex() -> &'static Regex {
     })
 }
 
-fn redact_passwords(text: &str) -> String {
-    password_regex()
-        .replace_all(text, "${1}[PASSWORD]")
-        .into_owned()
+fn redact_passwords<'a>(text: &'a str) -> Cow<'a, str> {
+    password_regex().replace_all(text, "${1}[PASSWORD]")
 }
 
 // ── Username-in-context patterns ────────────────────────────────────────────
@@ -169,7 +168,7 @@ pub(crate) fn command_user_flag_regex() -> &'static Regex {
     })
 }
 
-fn redact_username_contexts(text: &str, deterministic: bool) -> String {
+fn redact_username_contexts<'a>(text: &'a str, deterministic: bool) -> Cow<'a, str> {
     let placeholder = |username: &str| -> String {
         if deterministic {
             format!("USER_{}", hmac_tag(username))
@@ -178,44 +177,56 @@ fn redact_username_contexts(text: &str, deterministic: bool) -> String {
         }
     };
 
+    // Each step: only allocate (is_match + replace_all + into_owned) when there's a match.
+    // Otherwise pass the Cow through unchanged — zero allocation for the common case.
+
     // Shell login: user@host → [NAME]@host or USER_HASH@host
-    let text = shell_login_regex()
-        .replace_all(text, |caps: &regex::Captures| {
-            let user = &caps[1];
-            let host = &caps[2];
-            format!("{}@{}", placeholder(user), host)
-        })
-        .into_owned();
+    let text: Cow<'a, str> = if shell_login_regex().is_match(text) {
+        Cow::Owned(shell_login_regex()
+            .replace_all(text, |caps: &regex::Captures| {
+                let user = &caps[1];
+                let host = &caps[2];
+                format!("{}@{}", placeholder(user), host)
+            })
+            .into_owned())
+    } else {
+        Cow::Borrowed(text)
+    };
 
     // NERSC home paths: replace the username portion
-    let text = nersc_home_path_regex()
-        .replace_all(&text, |caps: &regex::Captures| {
-            let full = &caps[0];
-            // One of the 3 capture groups will have the username
-            let username = caps
-                .get(1)
-                .or_else(|| caps.get(2))
-                .or_else(|| caps.get(3))
-                .unwrap()
-                .as_str();
-            let p = placeholder(username);
-            let prefix_end = full.len() - username.len();
-            format!("{}{}", &full[..prefix_end], p)
-        })
-        .into_owned();
+    let text: Cow<'a, str> = if nersc_home_path_regex().is_match(&text) {
+        Cow::Owned(nersc_home_path_regex()
+            .replace_all(&text, |caps: &regex::Captures| {
+                let full = &caps[0];
+                let username = caps
+                    .get(1)
+                    .or_else(|| caps.get(2))
+                    .or_else(|| caps.get(3))
+                    .unwrap()
+                    .as_str();
+                let p = placeholder(username);
+                let prefix_end = full.len() - username.len();
+                format!("{}{}", &full[..prefix_end], p)
+            })
+            .into_owned())
+    } else {
+        text
+    };
 
     // Command user flags: -u username or --user username
-    let text = command_user_flag_regex()
-        .replace_all(&text, |caps: &regex::Captures| {
-            let full = &caps[0];
-            let username = &caps[1];
-            let p = placeholder(username);
-            let prefix_end = full.len() - username.len();
-            format!("{}{}", &full[..prefix_end], p)
-        })
-        .into_owned();
-
-    text
+    if command_user_flag_regex().is_match(&text) {
+        Cow::Owned(command_user_flag_regex()
+            .replace_all(&text, |caps: &regex::Captures| {
+                let full = &caps[0];
+                let username = &caps[1];
+                let p = placeholder(username);
+                let prefix_end = full.len() - username.len();
+                format!("{}{}", &full[..prefix_end], p)
+            })
+            .into_owned())
+    } else {
+        text
+    }
 }
 
 // ── Names (dictionary-based) ────────────────────────────────────────────────

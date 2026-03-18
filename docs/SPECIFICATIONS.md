@@ -325,16 +325,15 @@ The JSON output format preserves the original ServiceNow JSON structure with nor
 
 ## 5. Parallelism
 
-- A dedicated walker thread discovers JSON files and streams their paths through a channel. Rayon workers consume from the channel via `par_bridge()`, so discovery and processing overlap — no upfront collection pass is needed.
-- The walker uses `DirEntry::file_type()` instead of `path.is_dir()` to avoid per-entry `stat()` calls, which is critical on networked filesystems (Lustre, GPFS, NFS).
+- The `walkdir` crate discovers JSON files using `d_type` from `readdir()` on Linux, avoiding per-entry `stat()` calls — critical on networked filesystems (Lustre, GPFS, NFS). Discovered paths are collected and processed in parallel via Rayon's `par_iter()`.
 - Each ticket is fully independent: load, filter, normalize, dedup, build timeline, write output. No shared mutable state between tickets.
 - The pipeline is CPU-bound for normalization and I/O-bound for reads and writes. Rayon's work-stealing scheduler handles both well enough given the volume and the availability of many cores. If I/O contention becomes a bottleneck (unlikely on a parallel filesystem like GPFS/Lustre), a hybrid Rayon + async-I/O approach can be explored later.
 
 ## 6. Update Mode
 
 When `mode = "update"`:
-1. The walker thread streams JSON file paths to Rayon workers as they are discovered.
-2. **Before loading/processing each file**, do a lightweight pre-parse: read only `metadata.incident_number` and `incident_fields.opened_at` to compute the expected output path (markdown: `<output_dir>/YYYY/MM/INC########/ticket.md`; JSON: `<output_dir>/<relative_input_path>`).
+1. For JSON output, the output path is computed from the input file path alone (`<output_dir>/<relative_input_path>`) — no JSON parsing needed for the freshness check.
+2. For markdown output, the JSON file is read and parsed once. The `incident_number` and `opened_at` fields are extracted to compute the expected output path (`<output_dir>/YYYY/MM/INC########/ticket.md`). The parsed JSON is then reused for the full pipeline (no double-read).
 3. Compare the input file's `mtime` against the output file's `mtime`.
 4. If the output file does not exist or the input is newer, proceed with full loading and processing. Otherwise skip the file entirely — no further I/O or CPU work.
 
@@ -365,6 +364,7 @@ The input is trusted and well-formed. Errors indicate data problems that must be
 | `hmac` | HMAC-SHA256 for deterministic PII pseudonymization |
 | `sha2` | SHA-256 hash function (used by `hmac`) |
 | `hex` | Hex encoding for HMAC output |
+| `walkdir` | Recursive directory traversal (uses `d_type`, avoids `stat()`) |
 
 No logging framework — if something goes wrong, print the error to stderr and crash. Summary stats go to stdout at the end of the run.
 

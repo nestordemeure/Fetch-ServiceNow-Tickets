@@ -35,11 +35,11 @@ cargo run --release
 
 ## How It Works
 
-Ticket JSON files are discovered and processed in parallel — a walker thread streams file paths into Rayon workers via a channel, so discovery and processing overlap with no upfront collection pass:
+Ticket JSON files are discovered by `walkdir` (using `d_type` to avoid `stat()` overhead on networked filesystems) and processed in parallel via Rayon:
 
-0. **Freshness check**: in `update` mode, compare the input JSON's modification time against its output file. Skip the ticket entirely if the output is already up-to-date. In `replace` mode, all tickets are processed unconditionally.
+0. **Freshness check**: in `update` mode, compare the input JSON's modification time against its output file. For JSON output, the output path is computed from the file path alone (no parsing needed). For markdown output, the JSON is read once and reused for the full pipeline. Skip the ticket entirely if the output is already up-to-date. In `replace` mode, all tickets are processed unconditionally.
 
-1. **Load**: read the JSON file and deserialize it. Missing or unparseable required fields cause a hard error naming the file and field.
+1. **Load**: read the JSON file and deserialize it (reusing the parse from step 0 if already done). Missing or unparseable required fields cause a hard error naming the file and field.
 
 2. **Filter (config-based)**: skip the ticket based on configurable rules in the `[filter]` section:
    - `min_created_date`: exclude tickets opened before a given date.

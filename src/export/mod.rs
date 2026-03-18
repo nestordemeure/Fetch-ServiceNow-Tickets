@@ -24,6 +24,11 @@ pub fn output_path(
     }
 }
 
+/// Compute the JSON output path directly from the file path (no JSON parsing needed).
+pub fn json_output_path(json_input_path: &Path, config: &Config) -> PathBuf {
+    json::output_path(json_input_path, &config.input_dir, &config.output_dir)
+}
+
 /// Export a ticket: resolve attachments, build timeline, render, and write to disk.
 pub fn export_ticket(
     config: &Config,

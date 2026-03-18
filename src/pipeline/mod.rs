@@ -14,17 +14,31 @@ use crate::types::{Config, Mode, OutputFormat, TicketResult};
 
 /// Process a single ticket JSON file through the full pipeline.
 pub fn process_ticket(path: &Path, config: &Config) -> Result<TicketResult, String> {
-    // Step 0: Freshness check (update mode)
-    if matches!(config.mode, Mode::Update) {
-        let (incident_number, opened_date) = load::preparse_ticket(path)?;
+    // Step 0+1: Read JSON once, do freshness check, then load.
+    // For JSON output, the output path is computable from the file path alone —
+    // we can check freshness before even reading the file.
+    if matches!(config.mode, Mode::Update) && matches!(config.output_format, OutputFormat::Json) {
+        let output_path = export::json_output_path(path, config);
+        if is_up_to_date(path, &output_path)? {
+            return Ok(TicketResult::UpToDate);
+        }
+    }
+
+    // Read and parse the JSON file once
+    let data = load::read_json(path)?;
+
+    // For markdown output in update mode, check freshness using parsed fields
+    if matches!(config.mode, Mode::Update) && matches!(config.output_format, OutputFormat::Markdown) {
+        let incident_number = load::extract_incident_number(&data, path)?;
+        let opened_date = load::extract_opened_date(&data, path)?;
         let output_path = export::output_path(config, &incident_number, &opened_date, path);
         if is_up_to_date(path, &output_path)? {
             return Ok(TicketResult::UpToDate);
         }
     }
 
-    // Step 1: Load
-    let mut ticket = load::load_ticket(path, &config.input_dir, &config.output_format)?;
+    // Load ticket from the already-parsed Value (no re-read)
+    let mut ticket = load::load_ticket_from_value(data, path, &config.input_dir, &config.output_format)?;
 
     // Step 2a: Config-based filters (date, contact type, close code, state, creator, assignment group)
     if filter::should_skip_by_config(&ticket, &config.filter) {

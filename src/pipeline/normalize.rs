@@ -245,9 +245,10 @@ fn remove_author_name_lines(lines: &mut Vec<&str>, author: &str) {
 // ── Step 7: Trim blank lines ────────────────────────────────────────────────
 
 fn trim_blank_lines(lines: &mut Vec<&str>) {
-    // Trim leading blank lines
-    while lines.first().is_some_and(|l| l.trim().is_empty()) {
-        lines.remove(0);
+    // Trim leading blank lines (drain prefix in one operation)
+    let first_non_blank = lines.iter().position(|l| !l.trim().is_empty()).unwrap_or(lines.len());
+    if first_non_blank > 0 {
+        lines.drain(..first_non_blank);
     }
     // Trim trailing blank lines
     while lines.last().is_some_and(|l| l.trim().is_empty()) {

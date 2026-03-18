@@ -5,13 +5,16 @@ use serde_json::Value;
 
 use crate::types::{Attachment, Message, OutputFormat, Ticket};
 
-pub fn load_ticket(path: &Path, input_root: &Path, output_format: &OutputFormat) -> Result<Ticket, String> {
+/// Read a JSON file from disk and parse it into a serde_json::Value.
+pub fn read_json(path: &Path) -> Result<Value, String> {
     let content =
         std::fs::read_to_string(path).map_err(|e| format!("{}: read error: {}", path.display(), e))?;
+    serde_json::from_str(&content)
+        .map_err(|e| format!("{}: JSON parse error: {}", path.display(), e))
+}
 
-    let data: Value = serde_json::from_str(&content)
-        .map_err(|e| format!("{}: JSON parse error: {}", path.display(), e))?;
-
+/// Load a Ticket from an already-parsed JSON Value.
+pub fn load_ticket_from_value(data: Value, path: &Path, input_root: &Path, output_format: &OutputFormat) -> Result<Ticket, String> {
     let incident_number = require_json_str(&data, &["metadata", "incident_number"], path)?;
     let _number = require_json_str(&data, &["incident_fields", "number"], path)?;
     let status = require_json_str(&data, &["incident_fields", "state"], path)?;
@@ -108,19 +111,16 @@ pub fn load_ticket(path: &Path, input_root: &Path, output_format: &OutputFormat)
     })
 }
 
-/// Lightweight parse: extract only incident_number and opened_date for freshness checks.
-pub fn preparse_ticket(path: &Path) -> Result<(String, NaiveDate), String> {
-    let content =
-        std::fs::read_to_string(path).map_err(|e| format!("{}: read error: {}", path.display(), e))?;
-    let data: Value = serde_json::from_str(&content)
-        .map_err(|e| format!("{}: JSON parse error: {}", path.display(), e))?;
+/// Extract incident_number from an already-parsed JSON Value.
+pub fn extract_incident_number(data: &Value, path: &Path) -> Result<String, String> {
+    require_json_str(data, &["metadata", "incident_number"], path)
+}
 
-    let incident_number = require_json_str(&data, &["metadata", "incident_number"], path)?;
-    let opened_at_str = require_json_str(&data, &["incident_fields", "opened_at"], path)?;
-    let opened_date = parse_date(&opened_at_str)
-        .map_err(|e| format!("{}: opened_at '{}': {}", path.display(), opened_at_str, e))?;
-
-    Ok((incident_number, opened_date))
+/// Extract opened_date from an already-parsed JSON Value.
+pub fn extract_opened_date(data: &Value, path: &Path) -> Result<NaiveDate, String> {
+    let opened_at_str = require_json_str(data, &["incident_fields", "opened_at"], path)?;
+    parse_date(&opened_at_str)
+        .map_err(|e| format!("{}: opened_at '{}': {}", path.display(), opened_at_str, e))
 }
 
 fn parse_message(msg: &Value, internal: bool, ctx: &str) -> Result<Option<Message>, String> {

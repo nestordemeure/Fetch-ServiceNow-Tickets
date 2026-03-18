@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use rayon::prelude::*;
-
 use crate::types::Attachment;
 
 /// Sanitize a filename for filesystem safety.
@@ -107,7 +105,7 @@ pub fn copy_attachments(
     dest_dir: &Path,
     symlink_attachments: bool,
 ) -> Result<(), String> {
-    attachments.par_iter().try_for_each(|att| {
+    attachments.iter().try_for_each(|att| {
         let dest_path = dest_dir.join(&att.resolved_name);
         write_attachment(
             &att.local_path,

@@ -172,49 +172,63 @@ fn sanitize_watch_list_field(value: &mut Value) {
 
 /// Apply free-text PII scanning to a string value.
 /// Order: passwords, emails, shell logins, NERSC paths, command user flags, phones, names.
+/// Uses Cow<str> / is_match guards to avoid allocations when regexes don't match.
 fn sanitize_free_text(text: &str, name_matcher: &Option<AhoCorasick>) -> String {
-    let text = pii::password_regex()
-        .replace_all(text, "${1}[PASSWORD]")
-        .into_owned();
+    use std::borrow::Cow;
 
-    let text = pii::email_regex()
+    let text: Cow<str> = pii::password_regex().replace_all(text, "${1}[PASSWORD]");
+
+    let text: Cow<str> = pii::email_regex()
         .replace_all(&text, |caps: &regex::Captures| {
             format!("EMAIL_{}", pii::hmac_tag(&caps[0]))
-        })
-        .into_owned();
+        });
 
-    let text = pii::shell_login_regex()
-        .replace_all(&text, |caps: &regex::Captures| {
-            let user = &caps[1];
-            let host = &caps[2];
-            format!("USER_{}@{}", pii::hmac_tag(user), host)
-        })
-        .into_owned();
+    // For the chained username-context regexes, use is_match guards to avoid
+    // allocating when there's no match (the common case).
+    let text: Cow<str> = if pii::shell_login_regex().is_match(&text) {
+        Cow::Owned(pii::shell_login_regex()
+            .replace_all(&text, |caps: &regex::Captures| {
+                let user = &caps[1];
+                let host = &caps[2];
+                format!("USER_{}@{}", pii::hmac_tag(user), host)
+            })
+            .into_owned())
+    } else {
+        text
+    };
 
-    let text = pii::nersc_home_path_regex()
-        .replace_all(&text, |caps: &regex::Captures| {
-            let full = &caps[0];
-            let username = caps
-                .get(1)
-                .or_else(|| caps.get(2))
-                .or_else(|| caps.get(3))
-                .unwrap()
-                .as_str();
-            let prefix_end = full.len() - username.len();
-            format!("{}USER_{}", &full[..prefix_end], pii::hmac_tag(username))
-        })
-        .into_owned();
+    let text: Cow<str> = if pii::nersc_home_path_regex().is_match(&text) {
+        Cow::Owned(pii::nersc_home_path_regex()
+            .replace_all(&text, |caps: &regex::Captures| {
+                let full = &caps[0];
+                let username = caps
+                    .get(1)
+                    .or_else(|| caps.get(2))
+                    .or_else(|| caps.get(3))
+                    .unwrap()
+                    .as_str();
+                let prefix_end = full.len() - username.len();
+                format!("{}USER_{}", &full[..prefix_end], pii::hmac_tag(username))
+            })
+            .into_owned())
+    } else {
+        text
+    };
 
-    let text = pii::command_user_flag_regex()
-        .replace_all(&text, |caps: &regex::Captures| {
-            let full = &caps[0];
-            let username = &caps[1];
-            let prefix_end = full.len() - username.len();
-            format!("{}USER_{}", &full[..prefix_end], pii::hmac_tag(username))
-        })
-        .into_owned();
+    let text: Cow<str> = if pii::command_user_flag_regex().is_match(&text) {
+        Cow::Owned(pii::command_user_flag_regex()
+            .replace_all(&text, |caps: &regex::Captures| {
+                let full = &caps[0];
+                let username = &caps[1];
+                let prefix_end = full.len() - username.len();
+                format!("{}USER_{}", &full[..prefix_end], pii::hmac_tag(username))
+            })
+            .into_owned())
+    } else {
+        text
+    };
 
-    let text = pii::phone_regex().replace_all(&text, "[PHONE]").into_owned();
+    let text: Cow<str> = pii::phone_regex().replace_all(&text, "[PHONE]");
 
     // Name dictionary matching
     redact_names_deterministic(&text, name_matcher)

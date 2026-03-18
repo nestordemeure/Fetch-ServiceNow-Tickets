@@ -5,8 +5,8 @@ mod types;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use rayon::iter::ParallelBridge;
 use rayon::prelude::*;
+use walkdir::WalkDir;
 
 use types::{Mode, TicketResult};
 
@@ -25,28 +25,32 @@ fn main() {
         }
     }
 
-    // Stream JSON files from a walker thread into rayon workers.
-    // This avoids collecting all paths upfront (which is slow on
-    // networked filesystems due to stat() calls).
-    let (tx, rx) = std::sync::mpsc::channel();
-    let input_dir = config.input_dir.clone();
-    std::thread::spawn(move || {
-        walk_dir(&input_dir, &tx);
-    });
+    // Discover all JSON files. walkdir uses d_type from readdir() on Linux,
+    // avoiding a stat() syscall per entry — critical on networked filesystems.
+    let json_files: Vec<_> = WalkDir::new(&config.input_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file() && e.path().extension().is_some_and(|ext| ext == "json"))
+        .map(|e| e.into_path())
+        .collect();
 
-    // Process in parallel as files are discovered
-    let total = AtomicUsize::new(0);
+    let total = json_files.len();
+
+    if total == 0 {
+        eprintln!("ERROR: no JSON files found in {}", config.input_dir.display());
+        std::process::exit(1);
+    }
+
+    // Process in parallel
     let processed = AtomicUsize::new(0);
     let filtered = AtomicUsize::new(0);
     let up_to_date = AtomicUsize::new(0);
     let errored = AtomicUsize::new(0);
 
-    let errors: Vec<String> = rx
-        .into_iter()
-        .par_bridge()
+    let errors: Vec<String> = json_files
+        .par_iter()
         .filter_map(|path| {
-            total.fetch_add(1, Ordering::Relaxed);
-            match pipeline::process_ticket(&path, &config) {
+            match pipeline::process_ticket(path, &config) {
                 Ok(TicketResult::Processed) => {
                     processed.fetch_add(1, Ordering::Relaxed);
                     None
@@ -67,8 +71,6 @@ fn main() {
             }
         })
         .collect();
-
-    let total = total.load(Ordering::Relaxed);
 
     if total == 0 {
         eprintln!("ERROR: no JSON files found in {}", config.input_dir.display());
@@ -91,44 +93,5 @@ fn main() {
             eprintln!("  {}", e);
         }
         std::process::exit(1);
-    }
-}
-
-fn walk_dir(dir: &std::path::Path, tx: &std::sync::mpsc::Sender<std::path::PathBuf>) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("WARNING: cannot read directory {}: {}", dir.display(), e);
-            return;
-        }
-    };
-
-    for entry in entries {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(e) => {
-                eprintln!("WARNING: directory entry error: {}", e);
-                continue;
-            }
-        };
-
-        // Use file_type() from the dir entry instead of path.is_dir().
-        // On Linux this reads d_type from readdir(), avoiding a stat() per entry.
-        let ft = match entry.file_type() {
-            Ok(ft) => ft,
-            Err(e) => {
-                eprintln!("WARNING: cannot get file type for {}: {}", entry.path().display(), e);
-                continue;
-            }
-        };
-
-        if ft.is_dir() {
-            walk_dir(&entry.path(), tx);
-        } else if ft.is_file() {
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "json") {
-                let _ = tx.send(path);
-            }
-        }
     }
 }
