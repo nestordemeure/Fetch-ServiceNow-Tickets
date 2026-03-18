@@ -163,13 +163,13 @@ TimelineEntry {
 
 ## 4. Pipeline
 
-Each ticket JSON file goes through the following stages in order. The pipeline is applied to all files in parallel. The output format, normalization rules, and filtering rules are also specified in [`ticket_format_specification.md`](./ticket_format_specification.md); this section details the implementation-level behavior.
+Each ticket JSON file goes through the following stages in order. The pipeline is applied to all files in parallel. The markdown output format is specified in [`ticket_format_specification.md`](./ticket_format_specification.md); this section is the canonical reference for all pipeline behavior.
 
 ### 4.1 Load (`pipeline/load.rs`)
 
 - Read the JSON file from disk.
 - Deserialize into the internal `Ticket` model. Each field is read from its expected key — no fallback chains.
-- Parse timestamps into `NaiveDateTime`. Supported formats: `%Y-%m-%d %H:%M:%S`, `%Y-%m-%dT%H:%M:%S`, and RFC 3339 / ISO 8601.
+- Parse timestamps into `NaiveDateTime`. Supported formats: `%Y-%m-%d %H:%M:%S` and `%Y-%m-%dT%H:%M:%S`.
 - Extract the opened date from `opened_at`, closed date from `closed_at`. Both are truncated to `YYYY-MM-DD`. `closed_at` may be absent (ticket still open); all other required fields must be present or the ticket fails with an error identifying the file and field.
 
 ### 4.2 Filter (`pipeline/filter.rs`)
@@ -216,9 +216,9 @@ Skip the entire ticket if any of these match `short_description`:
 26. **High-load warning**: prefix match (case-insensitive) `"[response required] high load on "`.
 27. **Scratch touch policy warning**: exact match (case-insensitive) `"[response required] touching files in your scratch directory"`.
 28. **Running-watch policy warning**: exact match (case-insensitive) `"[response required] running watch on NERSC systems"` or equivalent subject variants containing `"running watch on NERSC systems"`.
-25. **Training renewal**: regex match (case-insensitive) `^Renewal of .+ Training for Staff$`.
-26. **Training expiring**: substring match (case-insensitive) containing `"Training expiring"`.
-27. **Account activation**: substring match (case-insensitive) containing `"NERSC Account activation"`.
+29. **Training renewal**: regex match (case-insensitive) `^Renewal of .+ Training for Staff$`.
+30. **Training expiring**: substring match (case-insensitive) containing `"Training expiring"`.
+31. **Account activation**: substring match (case-insensitive) containing `"NERSC Account activation"`.
 
 #### 4.2.3 Message-Level Filters
 
@@ -236,17 +236,22 @@ After messages are extracted, cleaned, and deduplicated:
 
 Message text is cleaned in the following order. Each step operates on the result of the previous step.
 
-1. **Strip leading metadata**: remove the first non-empty line(s) if they begin with (case-insensitive): `reply from:`, `created by:`, `created by reply`, `updated by reply`.
-2. **Remove greeting**: if the first non-empty line is a greeting (`Hi`, `Hello`, `Hey` with optional name; `Dear <name>`; `Good morning/afternoon/evening` with optional name), remove it. Punctuation (`,`, `!`, `.`) is optional.
+1. **Strip leading metadata**: remove the first non-empty line(s) if they begin with (case-insensitive): `reply from:`, `created by:`, `created by reply`, `updated by reply`, `email received from:`, `received from:`.
+2. **Remove greeting**: if the first non-empty line is a greeting (`Hi`, `Hello`, `Hey` with optional name; `Dear <name>`; `Good morning/afternoon/evening` with optional name; `To whom it may concern`), remove it. Punctuation (`,`, `!`, `.`) is optional.
 3. **Remove trailing date line**: if the last non-empty line is a standalone date (`YYYY-MM-DD`, `YYYY-MM-DD HH:MM:SS`, `MMM DD, YYYY`, `Month DD, YYYY` with optional timezone) or an email quote header (`On ... at ...`), remove it.
 4. **Remove footer lines**: remove any line (quoted `>` or not) matching NERSC footer patterns:
-   - `NERSC Account and Allocation Support.`
-   - `NERSC Account & Allocations Support.`
-   - `NERSC Consulting` (with optional `| User Engagement Group (UEG)`)
-   - `NERSC User Engagement Group Lead.`
-   - `NERSC Account Support:` (with or without email)
+   - `NERSC Account and Allocation Support`
+   - `NERSC Account Allocations Support`
+   - `NERSC Consulting` (with optional `User Engagement Group (UEG)`)
+   - `NERSC User Engagement Group` (with optional `Lead`)
+   - `NERSC Data Science Engagement Group`
+   - `NERSC Support` (with optional suffix)
+   - `Account and Allocation Support` / `Allocations and Account Support` / `Account Support`
+   - `NERSC Account Support` (with optional suffix)
+   - `NERSC User Support Team`
    - `accounts@nersc.gov`
-5. **Remove signoff**: if the last non-empty line is a signoff word (`Best`, `Regards`, `Cordially`, `Thanks`, `Thank you`, `Kind regards`, `Best regards`, `Warm regards`, `Best wishes`, `Many thanks`, `Sincerely`, `Cheers` with optional `,` or `.`), remove it. If a name line follows the signoff (possibly separated by blank lines), remove that too.
+   - Ohlone and Bay Miwok land acknowledgment
+5. **Remove signoff and signature block**: if the last non-empty line is a signoff word (`Best`, `Regards`, `Cordially`, `Thanks`, `Thank you`, `Kind regards`, `Best regards`, `Warm regards`, `Best wishes`, `Many thanks`, `Many thanks and best`, `Thanks in advance`, `Thanks and best`, `All the best`, `All best`, `Sincerely`, `Cheers`, `Bye` — with optional `,` or `.`), remove it. Also handles inline signoff-with-name (e.g. `Best, Joe`). If a name or signature block follows the signoff, remove that too — including name lines, institutional affiliations (department, lab, university, etc.), gender pronouns, email/phone labels, reply headers (`From:`, `Sent:`, `To:`, etc.), and HTML residue.
 6. **Remove author name lines**: remove any line (quoted `>` or not) that matches the message author's first name, full name, or `First L.` initial variant.
 7. **Trim whitespace**: strip leading and trailing blank lines. Preserve internal structure.
 
@@ -277,6 +282,7 @@ At load time, names, usernames, and name parts are extracted from ticket metadat
 - `incident_fields.caller_id`, `opened_by`, `closed_by`, `resolved_by` — parsed for names (handling `"Last, First (username)"` format) and usernames.
 - `incident_fields.sys_created_by` — plain username.
 - Individual name parts (first name, last name) are added alongside full names.
+- Terms shorter than 3 characters are excluded. Role/generic terms (`system`, `guest`, `operator`, `support`) and all-uppercase organization acronyms (e.g. `NERSC`) are also excluded.
 
 The opener is identified as the author of the first customer-facing (non-internal) message.
 
@@ -289,8 +295,9 @@ Redaction is applied in order:
    - **Shell logins**: `username@hostname` (e.g. `jsmith@perlmutter`) — replace the username portion.
    - **NERSC home paths**: `/global/homes/u/username`, `/pscratch/sd/u/username`, `/global/cfs/cdirs/project/username` — replace the username portion.
    - **Command user flags**: `-u username` or `--user username` — replace the username portion.
-4. **Phone numbers**: conservative pattern requiring country codes, parenthesized area codes, or explicit 3-3-4 digit grouping with separators. Avoids matching dates or node IDs. Replaced with `[PHONE]`.
-5. **Names**: Aho-Corasick case-insensitive dictionary match against the ticket's `known_pii` list. All matches replaced with `[NAME]` (or `USER_<HMAC>` in deterministic mode).
+4. **Zoom meeting details**: Zoom URLs (`zoom.us/j/...`), Meeting ID lines, and one-tap dial-in suffixes. Replaced with `[ZOOM]`.
+5. **Phone numbers**: conservative pattern requiring country codes, parenthesized area codes, or explicit 3-3-4 digit grouping with separators. Also handles label-gated detection (e.g. `Phone: 5551234567`, `Cell: ...`, `WhatsApp: ...`) for bare digit sequences near phone-related labels. Avoids matching dates or node IDs. Replaced with `[PHONE]`.
+6. **Names**: Aho-Corasick case-insensitive dictionary match against the ticket's `known_pii` list. All matches replaced with `[NAME]` (or `USER_<HMAC>` in deterministic mode).
 
 For markdown message headings only, when `deterministic_pii = false`, the opener's redacted author label is rendered as `[ASKER]` instead of `[NAME]`. Non-opener redacted author names remain `[NAME]`.
 
@@ -299,6 +306,7 @@ For markdown message headings only, when `deterministic_pii = false`, the opener
 When `deterministic_pii = true`, names and emails are replaced with HMAC-SHA256-based pseudonyms instead of generic placeholders:
 - Names → `USER_<10-hex-chars>` (e.g. `USER_A3F2B1C9D0`)
 - Emails → `EMAIL_<10-hex-chars>` (e.g. `EMAIL_B4E8C2A1F7`)
+- Zoom → `[ZOOM]` (always generic)
 - Passwords → `[PASSWORD]` (always generic, no identity to link)
 - Phones → `[PHONE]` (always generic, no identity to link)
 

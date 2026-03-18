@@ -6,7 +6,7 @@ Always read these files first to understand the project:
 
 1. `README.md` — what this does, how to use it, pipeline steps overview
 2. `docs/SPECIFICATIONS.md` — full implementation spec (config, data model, pipeline details, error handling)
-3. `docs/ticket_format_specification.md` — output format rules (markdown structure, normalization, filtering)
+3. `docs/ticket_format_specification.md` — markdown output format (directory layout, ticket.md structure)
 
 ## Project Layout
 
@@ -30,7 +30,7 @@ src/export/mod.rs                        — output format dispatch
 src/export/markdown.rs                   — markdown rendering per ticket_format_specification.md
 src/export/json.rs                       — JSON export with write-back, recursive PII, sorted keys
 docs/SPECIFICATIONS.md                   — full implementation specification
-docs/ticket_format_specification.md      — output format and normalization rules
+docs/ticket_format_specification.md      — markdown output format (directory layout, ticket.md structure)
 ```
 
 ## Key Principles
@@ -43,11 +43,11 @@ docs/ticket_format_specification.md      — output format and normalization rul
 
 ## Keeping Docs in Sync
 
-When adding or changing features, update **all three** of:
+When adding or changing features, update **all** of:
 1. The code
 2. `README.md` (How It Works section)
 3. `docs/SPECIFICATIONS.md` (relevant section)
-4. `docs/ticket_format_specification.md` (if normalization or filtering rules change)
+4. `docs/ticket_format_specification.md` (if output format rules change)
 
 ## Building and Running
 
