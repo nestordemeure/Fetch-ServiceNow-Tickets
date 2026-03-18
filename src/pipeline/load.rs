@@ -244,7 +244,7 @@ fn collect_pii_terms(data: &Value, messages: &[Message], out: &mut Vec<String>) 
     let mut add = |term: &str| {
         let t = term.trim().to_string();
         // Minimum 3 characters to avoid short tokens matching inside common words
-        if t.len() >= 3 && seen.insert(t.to_lowercase()) {
+        if t.len() >= 3 && should_index_pii_term(&t) && seen.insert(t.to_lowercase()) {
             out.push(t);
         }
     };
@@ -281,6 +281,30 @@ fn collect_pii_terms(data: &Value, messages: &[Message], out: &mut Vec<String>) 
     }
 }
 
+fn should_index_pii_term(term: &str) -> bool {
+    let trimmed = term.trim_matches(|c: char| !c.is_alphanumeric());
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let lower = trimmed.to_lowercase();
+    if matches!(lower.as_str(), "system" | "guest" | "operator" | "support") {
+        return false;
+    }
+
+    let letters: String = trimmed.chars().filter(|c| c.is_alphabetic()).collect();
+    if letters.len() >= 3 && letters.chars().all(|c| c.is_uppercase()) {
+        return false;
+    }
+
+    true
+}
+
+fn looks_like_person_name_component(component: &str) -> bool {
+    let trimmed = component.trim();
+    !trimmed.is_empty() && should_index_pii_term(trimmed)
+}
+
 /// Parse a name field like "Last, First (username)" or "First Last (username) (suffix)"
 /// and call `add` for the full name, individual parts, and username.
 fn extract_name_and_username(raw: &str, add: &mut impl FnMut(&str)) {
@@ -292,16 +316,18 @@ fn extract_name_and_username(raw: &str, add: &mut impl FnMut(&str)) {
     if let Some(paren_start) = raw.find('(') {
         let name_part = raw[..paren_start].trim();
         if !name_part.is_empty() {
-            // Full name (with possible "Last, First" format)
-            add(name_part);
             // Also add normalized "First Last" if comma-separated
             if let Some((last, first)) = name_part.split_once(',') {
                 let first = first.trim();
                 let last = last.trim();
-                add(&format!("{} {}", first, last));
-                add(first);
-                add(last);
+                if looks_like_person_name_component(first) && looks_like_person_name_component(last) {
+                    add(name_part);
+                    add(&format!("{} {}", first, last));
+                    add(first);
+                    add(last);
+                }
             } else {
+                add(name_part);
                 for part in name_part.split_whitespace() {
                     add(part);
                 }
@@ -319,5 +345,23 @@ fn extract_name_and_username(raw: &str, add: &mut impl FnMut(&str)) {
         for part in raw.split_whitespace() {
             add(part);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extract_name_and_username, should_index_pii_term};
+
+    #[test]
+    fn skips_role_and_org_name_parts() {
+        let mut terms = Vec::new();
+        extract_name_and_username("Operator, NERSC (operator)", &mut |term| terms.push(term.to_string()));
+        assert_eq!(terms, vec!["operator".to_string()]);
+    }
+
+    #[test]
+    fn rejects_all_caps_org_terms() {
+        assert!(!should_index_pii_term("NERSC"));
+        assert!(should_index_pii_term("Tony"));
     }
 }

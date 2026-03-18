@@ -39,7 +39,9 @@ pub fn export_ticket(
     pii_for_attachments: Option<(&Option<AhoCorasick>, bool)>,
 ) -> Result<(), String> {
     match config.output_format {
-        OutputFormat::Markdown => markdown::export(config, ticket, pii_for_attachments),
+        OutputFormat::Markdown => {
+            markdown::export(config, ticket, name_matcher, pii_for_attachments)
+        }
         OutputFormat::Json => {
             json::export(
                 ticket,

@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use aho_corasick::AhoCorasick;
 use chrono::NaiveDate;
 
+use crate::pii::redact;
 use crate::pipeline::{attachments, timeline};
-use crate::types::{Config, Ticket, TimelineEntryKind};
+use crate::types::{Config, PiiFilter, Ticket, TimelineEntryKind};
 
 /// Compute the output path for a ticket's markdown file.
 pub fn output_path(output_dir: &Path, incident_number: &str, opened_date: &NaiveDate) -> PathBuf {
@@ -22,6 +23,7 @@ pub fn output_path(output_dir: &Path, incident_number: &str, opened_date: &Naive
 pub fn export(
     config: &Config,
     ticket: &mut Ticket,
+    name_matcher: &Option<AhoCorasick>,
     pii_for_attachments: Option<(&Option<AhoCorasick>, bool)>,
 ) -> Result<(), String> {
     let ticket_dir = {
@@ -62,7 +64,12 @@ pub fn export(
     if let Some(ref desc) = ticket.short_description {
         if !desc.is_empty() {
             md.push_str(" - ");
-            md.push_str(desc);
+            md.push_str(&redact_markdown_field(
+                desc,
+                name_matcher,
+                !matches!(config.pii_filter, PiiFilter::None),
+                config.deterministic_pii,
+            ));
         }
     }
     md.push('\n');
@@ -85,7 +92,12 @@ pub fn export(
                 internal,
             } => {
                 md.push_str("## ");
-                md.push_str(author);
+                md.push_str(&redact_markdown_field(
+                    author,
+                    name_matcher,
+                    !matches!(config.pii_filter, PiiFilter::None),
+                    config.deterministic_pii,
+                ));
                 if *internal {
                     md.push_str(" (staff work notes)");
                 }
@@ -120,4 +132,50 @@ pub fn export(
     )?;
 
     Ok(())
+}
+
+fn redact_markdown_field(
+    text: &str,
+    name_matcher: &Option<AhoCorasick>,
+    pii_enabled: bool,
+    deterministic: bool,
+) -> String {
+    if !pii_enabled || !redact::might_contain_pii(text, name_matcher) {
+        return text.to_string();
+    }
+    redact::redact_text(text, name_matcher, deterministic)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact_markdown_field;
+    use aho_corasick::AhoCorasick;
+
+    #[test]
+    fn redacts_author_email_in_markdown_heading() {
+        let matcher = Some(
+            AhoCorasick::builder()
+                .ascii_case_insensitive(true)
+                .build(["Adrian Hill"])
+                .unwrap(),
+        );
+        let redacted = redact_markdown_field(
+            "Adrian Hill (adrianhill@berkeley.edu)",
+            &matcher,
+            true,
+            false,
+        );
+        assert_eq!(redacted, "[NAME] ([EMAIL])");
+    }
+
+    #[test]
+    fn redacts_ticket_title_metadata() {
+        let redacted = redact_markdown_field(
+            "Reactivate account yezhenyu@nersc.gov",
+            &None,
+            true,
+            false,
+        );
+        assert_eq!(redacted, "Reactivate account [EMAIL]");
+    }
 }

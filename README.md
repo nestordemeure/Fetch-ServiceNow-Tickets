@@ -101,9 +101,13 @@ Ticket JSON files are discovered by `walkdir` (using `d_type` to avoid `stat()` 
 
 ## TODO
 
+- tickets type worth filtering out:
+  - "Storage Quota increase - extension"
+  - "ERCAP request"
+  - "Re: [Users] ERCAP Requests due by 11:59 pm; Join us for ERCAP Office Hours!"
+
 - run clippy over everything
-- can ticket filtering be done with a single regexp instead of many ors?
-- look at processed tickets for missed PII
+- anonimization in message authors makes the format harder to read
 - review all texts (readme, claude, specs)
 - Import tickets directly from the ServiceNow API
   - Add scron script to refresh tickets regularly

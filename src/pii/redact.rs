@@ -10,6 +10,10 @@ use sha2::Sha256;
 /// Not for security — just for consistency across runs.
 const HMAC_SALT: &[u8] = b"nersc-ticket-processor-v1";
 
+fn merged_alternation(parts: &[&str]) -> String {
+    format!("(?:{})", parts.join("|"))
+}
+
 // ── Deterministic hashing ─────────────────────────────────────────────────
 
 pub(crate) fn hmac_tag(input: &str) -> String {
@@ -31,9 +35,15 @@ fn pii_regex_set() -> &'static RegexSet {
             // email
             r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}",
             // phone patterns
-            r"\+\d{1,3}[\s\-.]?\(?\d{2,3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}",
+            // Keep the pre-screen broad enough to catch likely phone shapes, but avoid
+            // generic digit blobs that would trigger on timestamps, IDs, and job metadata.
+            r"\+\d{1,3}[\s\-.]?\(?\d{2,4}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}",
+            r"\(\+\d{1,3}\)\s*\d{3,4}[\s\-.]?\d{3}[\s\-.]?\d{4}",
             r"\(\d{3}\)\s?\d{3}[\s\-.]?\d{4}",
             r"\b\d{3}[\-\.]\d{3}[\-\.]\d{4}\b",
+            // Label-gated phone detection handles bare 10-digit numbers and spaced variants
+            // only when they appear in phone-like fields such as "Work Phone Number:".
+            r"(?i)(?:work\s+phone(?:\s+number)?|office\s+phone(?:\s+number)?|phone(?:\s+number)?|phone\s*#|cell|cel|mobile|tel|ph|fax|whatsapp)",
             // password
             r"(?i)(?:pass(?:word|wd|code)?|pin|secret)\s*[:=]\s*\S+",
             // shell login (user@host) — overlaps with email, but both need checking
@@ -58,12 +68,18 @@ pub(crate) fn might_contain_pii(text: &str, name_matcher: &Option<AhoCorasick>) 
 }
 
 /// Redact PII from a single text string.
-/// Applied in order: passwords, emails, username-in-context patterns, phones, then names.
+/// Applied in order: passwords, emails, username-in-context patterns, Zoom,
+/// phones, then names.
 /// Uses Cow<str> throughout to avoid allocations when regexes don't match.
 pub(crate) fn redact_text(text: &str, name_matcher: &Option<AhoCorasick>, deterministic: bool) -> String {
     let text: Cow<str> = redact_passwords(text);
     let text: Cow<str> = redact_emails(&text, deterministic);
     let text: Cow<str> = redact_username_contexts(&text, deterministic);
+    let text: Cow<str> = if might_contain_zoom(&text) {
+        redact_zoom(&text)
+    } else {
+        text
+    };
     let text: Cow<str> = redact_phones(&text);
     match redact_names(&text, name_matcher, deterministic) {
         Cow::Borrowed(s) => s.to_string(),
@@ -102,21 +118,112 @@ pub(crate) fn phone_regex() -> &'static Regex {
         Regex::new(concat!(
             r"(?:",
             // +1 (555) 123-4567 or +1-555-123-4567
-            r"\+\d{1,3}[\s\-.]?\(?\d{2,3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}",
+            r"\+\d{1,3}[\s\-.]?\(?\d{2,4}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}",
+            r"|",
+            // (+91) 9444511865 or (+91) 9444 511 865
+            r"\(\+\d{1,3}\)\s*\d{3,4}[\s\-.]?\d{3}[\s\-.]?\d{4}",
             r"|",
             // (555) 123-4567
             r"\(\d{3}\)\s?\d{3}[\s\-.]?\d{4}",
             r"|",
             // 555-123-4567 or 555.123.4567 (3-3-4 pattern with separators)
             r"\b\d{3}[\-\.]\d{3}[\-\.]\d{4}\b",
+            r"|",
+            // 555 123 4567, only when the groups are explicitly separated.
+            // This stays out of the bare-10-digit case to avoid matching common IDs.
+            r"\b\d{3}\s\d{3}\s\d{4}\b",
             r")",
         ))
         .unwrap()
     })
 }
 
+fn phone_label_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)(?:work\s+phone(?:\s+number)?|office\s+phone(?:\s+number)?|phone(?:\s+number)?|phone\s*#|cell|cel|mobile|tel|ph|fax|whatsapp)",
+        )
+        .unwrap()
+    })
+}
+
+fn labeled_phone_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        let label = r"(?i:(?:work\s+phone(?:\s+number)?|office\s+phone(?:\s+number)?|phone(?:\s+number)?|phone\s*#|cell|cel|mobile|tel|ph|fax|whatsapp)\s*(?:is\s*)?[:=\-]?\s*)";
+        let compact = r"(?:\(\+\d{1,3}\)\s*\d{7,11}|\+?\d{1,3}[\-\.]\d{1,4}[\-\.]\d{3,4}[\-\.]\d{4}|\d{10})\b";
+        let spaced = r"(?:\(\+\d{1,3}\)\s*\d{3,4}[\s\-.]\d{3}[\s\-.]\d{4}|\+?\d{1,3}[\s\-.]\d{1,4}[\s\-.]\d{3,4}[\s\-.]\d{4}|\d{3}[\s\-.]\d{3}[\s\-.]\d{4})\b";
+        let with_ext = r"(?:\+?\d{1,3}[\-\.]\d{1,4}[\-\.]\d{6,8}|\+?\d{1,3}[\s\-.]\d{1,4}[\s\-.]\d{6,8})(?:\s*(?:ext\.?|x)\s*\d{1,6})\b";
+        let odd = r"\d[\d/\-]{7,}\d\b";
+        let merged = format!("({}){}", label, merged_alternation(&[with_ext, spaced, compact, odd]));
+        Regex::new(&merged).unwrap()
+    })
+}
+
 fn redact_phones<'a>(text: &'a str) -> Cow<'a, str> {
-    phone_regex().replace_all(text, "[PHONE]")
+    // Use a cheap label pre-check, then a merged regex built from narrower phone shapes.
+    let text = if phone_label_regex().is_match(text) {
+        Cow::Owned(
+            labeled_phone_regex()
+                .replace_all(text, "${1}[PHONE]")
+                .into_owned(),
+        )
+    } else {
+        Cow::Borrowed(text)
+    };
+
+    if phone_regex().is_match(&text) {
+        Cow::Owned(phone_regex().replace_all(&text, "[PHONE]").into_owned())
+    } else {
+        text
+    }
+}
+
+// ── Zoom meeting details ────────────────────────────────────────────────────
+// Zoom links and meeting IDs are not useful in the exported corpus, and the
+// one-tap mobile suffix is just another encoding of the same meeting details.
+
+fn zoom_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        let url = r"(?P<url>https?://[A-Za-z0-9.-]*zoom\.us/(?:j|meeting[s]?)/[^\s)>]+)";
+        let meeting_id = r"(?P<meeting>(?P<meeting_prefix>(?i:meeting\s+id)\s*:\s*)\d(?:[\s-]?\d){8,})";
+        let one_tap = r"(?P<one_tap>(?P<one_tap_prefix>,,)\d+#(?:,+\*\d+#)?)";
+        let merged = merged_alternation(&[url, meeting_id, one_tap]);
+        Regex::new(&merged).unwrap()
+    })
+}
+
+fn might_contain_zoom(text: &str) -> bool {
+    text.contains("zoom.us")
+        || text.contains("Zoom")
+        || text.contains("zoom")
+        || text.contains("Meeting ID")
+        || text.contains("meeting id")
+        || text.contains(",,")
+}
+
+fn redact_zoom<'a>(text: &'a str) -> Cow<'a, str> {
+    if zoom_regex().is_match(text) {
+        Cow::Owned(
+            zoom_regex()
+                .replace_all(text, |caps: &regex::Captures| {
+                    if caps.name("url").is_some() {
+                        "[ZOOM]".to_string()
+                    } else if let Some(prefix) = caps.name("meeting_prefix") {
+                        format!("{}[ZOOM]", prefix.as_str())
+                    } else if let Some(prefix) = caps.name("one_tap_prefix") {
+                        format!("{}[ZOOM]", prefix.as_str())
+                    } else {
+                        "[ZOOM]".to_string()
+                    }
+                })
+                .into_owned(),
+        )
+    } else {
+        Cow::Borrowed(text)
+    }
 }
 
 // ── Passwords ───────────────────────────────────────────────────────────────
@@ -233,13 +340,13 @@ fn redact_username_contexts<'a>(text: &'a str, deterministic: bool) -> Cow<'a, s
 
 /// Check if a byte position is at a word boundary (not adjacent to an alphanumeric char).
 pub(crate) fn is_word_boundary(text: &str, pos: usize) -> bool {
-    if pos == 0 || pos >= text.len() {
+    if pos == 0 || pos == text.len() {
         return true;
     }
     let bytes = text.as_bytes();
-    // Check the byte at the boundary: if it's part of a multi-byte UTF-8 sequence,
-    // it's not an ASCII alphanumeric, so it's a boundary.
-    !bytes[pos].is_ascii_alphanumeric()
+    // A boundary is the position between bytes[pos - 1] and bytes[pos].
+    // If either side is non-ASCII-alphanumeric, it counts as a word break.
+    !bytes[pos - 1].is_ascii_alphanumeric() || !bytes[pos].is_ascii_alphanumeric()
 }
 
 fn redact_names<'a>(text: &'a str, matcher: &Option<AhoCorasick>, deterministic: bool) -> Cow<'a, str> {
@@ -278,5 +385,90 @@ fn redact_names<'a>(text: &'a str, matcher: &Option<AhoCorasick>, deterministic:
         Cow::Owned(result)
     } else {
         Cow::Borrowed(text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact_text;
+    use aho_corasick::AhoCorasick;
+
+    #[test]
+    fn redacts_labeled_contiguous_ten_digit_phone() {
+        let redacted = redact_text("Phone number - 6513410805", &None, false);
+        assert_eq!(redacted, "Phone number - [PHONE]");
+    }
+
+    #[test]
+    fn redacts_international_phone_with_four_digit_area_code() {
+        let redacted = redact_text("+9 (0532) 596 1729", &None, false);
+        assert_eq!(redacted, "[PHONE]");
+    }
+
+    #[test]
+    fn redacts_labeled_spaced_phone() {
+        let redacted = redact_text("Work Phone Number: 931 200 4393", &None, false);
+        assert_eq!(redacted, "Work Phone Number: [PHONE]");
+    }
+
+    #[test]
+    fn redacts_labeled_phone_with_is() {
+        let redacted = redact_text("my phone number is 6466090124", &None, false);
+        assert_eq!(redacted, "my phone number is [PHONE]");
+    }
+
+    #[test]
+    fn redacts_whatsapp_phone() {
+        let redacted = redact_text("WhatsApp: (+91) 9444511865", &None, false);
+        assert_eq!(redacted, "WhatsApp: [PHONE]");
+    }
+
+    #[test]
+    fn redacts_cel_phone() {
+        let redacted = redact_text("Cel: 6314136020", &None, false);
+        assert_eq!(redacted, "Cel: [PHONE]");
+    }
+
+    #[test]
+    fn redacts_phone_with_extension() {
+        let redacted = redact_text("Tel: +886-3-5780281 ext. 6307", &None, false);
+        assert_eq!(redacted, "Tel: [PHONE]");
+    }
+
+    #[test]
+    fn redacts_phone_with_odd_separators() {
+        let redacted = redact_text("Tel: 1-865//591-4805", &None, false);
+        assert_eq!(redacted, "Tel: [PHONE]");
+    }
+
+    #[test]
+    fn redacts_ph_label() {
+        let redacted = redact_text("Ph: 3034971289", &None, false);
+        assert_eq!(redacted, "Ph: [PHONE]");
+    }
+
+    #[test]
+    fn redacts_zoom_meeting_details() {
+        let redacted = redact_text(
+            "Join Zoom Meeting\nhttps://lbnl.zoom.us/j/7314990879?pwd=abc\nMeeting ID: 731 499 0879\n[PHONE],,7314990879#,,,,*760714# US (Los Angeles)",
+            &None,
+            false,
+        );
+        assert_eq!(
+            redacted,
+            "Join Zoom Meeting\n[ZOOM]\nMeeting ID: [ZOOM]\n[PHONE],,[ZOOM] US (Los Angeles)"
+        );
+    }
+
+    #[test]
+    fn redacts_names_and_emails_together() {
+        let matcher = Some(
+            AhoCorasick::builder()
+                .ascii_case_insensitive(true)
+                .build(["Adrian Hill"])
+                .unwrap(),
+        );
+        let redacted = redact_text("Adrian Hill <adrianhill@berkeley.edu>", &matcher, false);
+        assert_eq!(redacted, "[NAME] <[EMAIL]>");
     }
 }
