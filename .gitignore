@@ -3,3 +3,4 @@ tickets/
 target/
 Cargo.lock
 perf.*
+.claude

@@ -1,5 +1,5 @@
 # Path to the directory containing raw ServiceNow incident JSON files.
-input_dir = "/home/nestor/Documents/work/NERSC/tickets/demo_ticket_stash/steve"
+input_dir = "/global/cfs/cdirs/nstaff/agentic-ops/servicenow_incidents"
 
 # Path to the directory where processed tickets are written.
 output_dir = "./tickets"
