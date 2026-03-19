@@ -78,6 +78,13 @@ fn main() {
         std::process::exit(1);
     }
 
+    // Write AGENT.md at output root for markdown exports
+    if matches!(config.output_format, types::OutputFormat::Markdown) {
+        if let Err(e) = export::markdown::write_agent_md(&config.output_dir) {
+            eprintln!("ERROR: {}", e);
+        }
+    }
+
     // Summary
     println!();
     println!("=== Summary ===");

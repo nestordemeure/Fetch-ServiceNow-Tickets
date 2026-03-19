@@ -19,6 +19,34 @@ pub fn output_path(output_dir: &Path, incident_number: &str, opened_date: &Naive
         .join("ticket.md")
 }
 
+/// Write AGENT.md at the output root describing the ticket structure.
+pub fn write_agent_md(output_dir: &Path) -> Result<(), String> {
+    let agent_md_path = output_dir.join("AGENT.md");
+    let output_root = output_dir.display();
+    let content = format!(
+        "# NERSC ServiceNow Tickets\n\
+         \n\
+         Tickets are stored at: `{output_root}`\n\
+         \n\
+         Each ticket has its own folder containing a `ticket.md` file plus any \
+         attachments for that ticket (if present).\n\
+         Attachments live alongside the markdown file in the same folder.\n\
+         \n\
+         File structure:\n\
+         \n\
+         ```\n\
+         /tickets/YYYY/MM/INC########/\n\
+         \x20 ticket.md\n\
+         \x20 <attachment files>\n\
+         ```\n\
+         \n\
+         While you are not allowed to modify those files, you should search them \
+         for past solutions to problems and other useful information.\n"
+    );
+    std::fs::write(&agent_md_path, &content)
+        .map_err(|e| format!("cannot write {}: {}", agent_md_path.display(), e))
+}
+
 /// Export a ticket as markdown.
 pub fn export(
     config: &Config,
