@@ -388,6 +388,62 @@ fn redact_names<'a>(text: &'a str, matcher: &Option<AhoCorasick>, deterministic:
     }
 }
 
+// ── Author-specific redaction ────────────────────────────────────────────────
+// Author strings are always names (possibly with an embedded email address).
+// Skip patterns that never appear in author fields (passwords, phones, Zoom
+// links, username-in-context) and replace the name portion directly with the
+// caller-supplied placeholder — no second-pass `.replace("[NAME]", ...)` needed.
+
+/// Redact PII from a message author string.
+///
+/// Only emails and names are redacted — authors are names, not free-form text.
+/// In non-deterministic mode the name is replaced with `name_placeholder`
+/// (`"[ASKER]"` or `"[NAME]"`). In deterministic mode it is replaced with
+/// `USER_<HMAC>` and the placeholder argument is ignored.
+pub(crate) fn redact_author(
+    text: &str,
+    name_matcher: &Option<AhoCorasick>,
+    name_placeholder: &str,
+    deterministic: bool,
+) -> String {
+    if deterministic {
+        let after_email = email_regex().replace_all(text, |caps: &regex::Captures| {
+            format!("EMAIL_{}", hmac_tag(&caps[0]))
+        });
+        match redact_names(&after_email, name_matcher, true) {
+            Cow::Borrowed(s) => s.to_string(),
+            Cow::Owned(s) => s,
+        }
+    } else {
+        let after_email = email_regex().replace_all(text, "[EMAIL]");
+        redact_name_as(&after_email, name_matcher, name_placeholder)
+    }
+}
+
+/// Replace every word-boundary-aligned name match with `placeholder`.
+/// Non-deterministic only — deterministic callers use `redact_names(..., true)`.
+fn redact_name_as(text: &str, matcher: &Option<AhoCorasick>, placeholder: &str) -> String {
+    let ac = match matcher {
+        Some(ac) => ac,
+        None => return text.to_string(),
+    };
+
+    let mut result = String::with_capacity(text.len());
+    let mut last_end = 0;
+
+    for mat in ac.find_iter(text) {
+        let start = mat.start();
+        let end = mat.end();
+        if is_word_boundary(text, start) && is_word_boundary(text, end) {
+            result.push_str(&text[last_end..start]);
+            result.push_str(placeholder);
+            last_end = end;
+        }
+    }
+    result.push_str(&text[last_end..]);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::redact_text;

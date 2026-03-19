@@ -182,17 +182,18 @@ fn redact_markdown_author(
     pii_enabled: bool,
     deterministic: bool,
 ) -> String {
-    let redacted = redact_markdown_field(author, name_matcher, pii_enabled, deterministic);
-    if deterministic {
-        return redacted;
+    if !pii_enabled {
+        return author.to_string();
     }
-
-    let name_placeholder = match opener {
-        Some(opener) if opener == author => "[ASKER]",
-        _ => "[NAME]",
+    // Authors are always names (possibly with an embedded email). Use the
+    // targeted author redactor: only emails and names are checked, and the
+    // [ASKER]/[NAME] placeholder is substituted directly in one AC pass.
+    let name_placeholder = if opener.is_some_and(|o| o == author) {
+        "[ASKER]"
+    } else {
+        "[NAME]"
     };
-
-    redacted.replace("[NAME]", name_placeholder)
+    redact::redact_author(author, name_matcher, name_placeholder, deterministic)
 }
 
 #[cfg(test)]

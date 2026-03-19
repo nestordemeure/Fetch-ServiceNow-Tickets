@@ -170,7 +170,20 @@ fn parse_attachment(att: &Value, input_root: &Path, ctx: &str) -> Result<Attachm
     let local_path_str = att["local_path"]
         .as_str()
         .ok_or_else(|| format!("{}: missing 'local_path'", ctx))?;
-    let local_path = input_root.join(local_path_str);
+    // The local_path in the JSON is relative to the parent of input_root (e.g.
+    // "servicenow_incidents/INC012/..."), not to input_root itself.  Strip the
+    // leading "<input_dir_name>/" prefix when present so we don't double it.
+    let effective_local_path = if let Some(dir_name) = input_root.file_name().and_then(|n| n.to_str()) {
+        let prefix = format!("{}/", dir_name);
+        if local_path_str.starts_with(prefix.as_str()) {
+            &local_path_str[prefix.len()..]
+        } else {
+            local_path_str
+        }
+    } else {
+        local_path_str
+    };
+    let local_path = input_root.join(effective_local_path);
 
     Ok(Attachment {
         original_name: file_name,

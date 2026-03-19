@@ -12,6 +12,9 @@ enum FieldKind {
     User,
     Email,
     WatchList,
+    /// Field value is structurally constrained (timestamp, ID, enum) and can
+    /// never contain PII. Skip the free-text scan entirely.
+    Skip,
 }
 
 /// Single HashMap for O(1) field classification instead of three linear scans.
@@ -37,6 +40,26 @@ fn field_kinds() -> &'static HashMap<&'static str, FieldKind> {
         ] {
             m.insert(f, FieldKind::WatchList);
         }
+        // Timestamp fields: always date/datetime strings, never contain PII
+        for f in [
+            "opened_at", "closed_at", "resolved_at",
+            "sys_created_on", "sys_updated_on",
+            "u_resolved_at", "reopened_time",
+        ] {
+            m.insert(f, FieldKind::Skip);
+        }
+        // Incident ID and GUID fields: alphanumeric identifiers, never PII
+        for f in ["number", "sys_id", "parent", "parent_incident"] {
+            m.insert(f, FieldKind::Skip);
+        }
+        // Enum/status fields: short controlled-vocabulary values, never PII
+        for f in [
+            "state", "impact", "urgency", "priority",
+            "contact_type", "close_code", "category", "subcategory",
+            "approval", "active",
+        ] {
+            m.insert(f, FieldKind::Skip);
+        }
         m
     })
 }
@@ -60,6 +83,7 @@ pub fn sanitize_value(value: &mut Value, name_matcher: &Option<AhoCorasick>) {
                         Some(FieldKind::User) => sanitize_user_field(val),
                         Some(FieldKind::Email) => sanitize_email_field(val),
                         Some(FieldKind::WatchList) => sanitize_watch_list_field(val),
+                        Some(FieldKind::Skip) => {}
                         None => sanitize_value(val, name_matcher),
                     }
                 }
