@@ -2,7 +2,7 @@ pub mod attachments;
 pub mod json;
 pub mod redact;
 
-use aho_corasick::{AhoCorasick, MatchKind};
+use aho_corasick::{AhoCorasick, AhoCorasickKind, MatchKind};
 
 use crate::types::{PiiFilter, Ticket};
 
@@ -17,6 +17,7 @@ pub fn build_name_matcher(known_pii: &[String]) -> Option<AhoCorasick> {
     AhoCorasick::builder()
         .ascii_case_insensitive(true)
         .match_kind(MatchKind::LeftmostLongest)
+        .kind(Some(AhoCorasickKind::DFA))
         .build(patterns)
         .ok()
 }
