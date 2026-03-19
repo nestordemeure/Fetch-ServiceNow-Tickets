@@ -22,7 +22,9 @@ pub fn output_path(output_dir: &Path, incident_number: &str, opened_date: &Naive
 /// Write AGENT.md at the output root describing the ticket structure.
 pub fn write_agent_md(output_dir: &Path) -> Result<(), String> {
     let agent_md_path = output_dir.join("AGENT.md");
-    let output_root = output_dir.display();
+    let abs_output_dir = std::fs::canonicalize(output_dir)
+        .unwrap_or_else(|_| output_dir.to_path_buf());
+    let output_root = abs_output_dir.display();
     let content = format!(
         "# NERSC ServiceNow Tickets\n\
          \n\

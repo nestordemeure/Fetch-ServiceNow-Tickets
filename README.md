@@ -60,12 +60,5 @@ See [docs/SPECIFICATIONS.md](docs/SPECIFICATIONS.md) for the full pipeline speci
 
 ## TODO
 
-- update claude.md
-  - include readme and docs/specs
-  - require clippy runs and fixes after major code changes
-  - introduce agent.md, the claude file just loading it
-
-- in generated agent.md, have path be absolute
-
 - Import tickets directly from the ServiceNow API
   - Add scron script to refresh tickets regularly
