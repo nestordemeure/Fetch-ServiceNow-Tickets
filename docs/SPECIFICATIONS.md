@@ -57,7 +57,7 @@ src/
   config.rs            - TOML config parsing and validation
   types.rs             - shared data structures (Ticket, Message, Attachment, TimelineEntry)
   pii/
-    mod.rs             - PII public API: build_name_matcher(), filter_pii()
+    mod.rs             - PII public API: build_pii_matchers(), filter_pii()
     redact.rs          - string-level PII: regexes, hmac_tag(), redact_text(), all helpers
     json.rs            - recursive JSON tree PII sanitization (athos-compatible)
     attachments.rs     - text file detection + PII redaction for attachment files
@@ -134,7 +134,8 @@ Ticket {
   assignment_group: Option<String>,
   messages: Vec<Message>,
   attachments: Vec<Attachment>,
-  known_pii: Vec<String>,       // names, usernames extracted from ticket metadata
+  known_names: Vec<String>,     // full names and name parts extracted from ticket metadata
+  known_usernames: Vec<String>, // login IDs extracted from ticket metadata
   opener: Option<String>,       // author of the first customer-facing message
   raw_json: Option<Value>,      // original JSON, preserved only for Json output format
 }
@@ -277,12 +278,13 @@ Controlled by the `pii_filter` config field. Applied after normalization and ded
 
 #### 4.5.1 PII Extraction (at load time)
 
-At load time, names, usernames, and name parts are extracted from ticket metadata into a `known_pii` list:
-- Raw `created_by` fields from all messages (both customer-facing and internal work notes). Parenthesized usernames like `(ebasheer)` are extracted.
-- `incident_fields.caller_id`, `opened_by`, `closed_by`, `resolved_by` — parsed for names (handling `"Last, First (username)"` format) and usernames.
-- `incident_fields.sys_created_by` — plain username.
-- Individual name parts (first name, last name) are added alongside full names.
-- Terms shorter than 3 characters are excluded. Role/generic terms (`system`, `guest`, `operator`, `support`) and all-uppercase organization acronyms (e.g. `NERSC`) are also excluded.
+At load time, names and usernames are extracted from ticket metadata into two separate lists — `known_names` and `known_usernames`:
+
+**Names** (`known_names`): full names and name parts from message `created_by` fields, plus name components from `caller_id`, `opened_by`, `closed_by`, `resolved_by` (handling `"Last, First (username)"` format — name part only).
+
+**Usernames** (`known_usernames`): parenthesized login IDs from `created_by` and the above incident fields (e.g. `(ebasheer)` → `ebasheer`), plus the plain `sys_created_by` value.
+
+In both lists, terms shorter than 3 characters are excluded. Role/generic terms (`system`, `guest`, `operator`, `support`) and all-uppercase organization acronyms (e.g. `NERSC`) are also excluded.
 
 The opener is identified as the author of the first customer-facing (non-internal) message.
 
@@ -292,14 +294,18 @@ Redaction is applied in order:
 1. **Passwords**: regex matching `password:`, `passwd=`, `passcode:`, `pin:`, `secret:` followed by a value. The label is preserved, the value is replaced with `[PASSWORD]`.
 2. **Emails**: standard email pattern, replaced with `[EMAIL]` (or `EMAIL_<HMAC>` in deterministic mode).
 3. **Username-in-context patterns**: detect usernames embedded in common NERSC contexts:
-   - **Shell logins**: `username@hostname` (e.g. `jsmith@perlmutter`) — replace the username portion.
-   - **NERSC home paths**: `/global/homes/u/username`, `/pscratch/sd/u/username`, `/global/cfs/cdirs/project/username` — replace the username portion.
-   - **Command user flags**: `-u username` or `--user username` — replace the username portion.
+   - **Shell logins**: `username@hostname` (e.g. `jsmith@perlmutter`) — replace the username portion with `[USERNAME]` (or `USER_<HMAC>` in deterministic mode).
+   - **NERSC home paths**: `/global/homes/u/username`, `/pscratch/sd/u/username`, `/global/cfs/cdirs/project/username` — replace the username portion with `[USERNAME]` (or `USER_<HMAC>`).
+   - **Command user flags**: `-u username` or `--user username` — replace the username portion with `[USERNAME]` (or `USER_<HMAC>`).
 4. **Zoom meeting details**: Zoom URLs (`zoom.us/j/...`), Meeting ID lines, and one-tap dial-in suffixes. Replaced with `[ZOOM]`.
 5. **Phone numbers**: conservative pattern requiring country codes, parenthesized area codes, or explicit 3-3-4 digit grouping with separators. Also handles label-gated detection (e.g. `Phone: 5551234567`, `Cell: ...`, `WhatsApp: ...`) for bare digit sequences near phone-related labels. Avoids matching dates or node IDs. Replaced with `[PHONE]`.
-6. **Names**: Aho-Corasick case-insensitive dictionary match against the ticket's `known_pii` list. All matches replaced with `[NAME]` (or `USER_<HMAC>` in deterministic mode).
+6. **Names and usernames**: Aho-Corasick case-insensitive dictionary match against the ticket's `known_names` and `known_usernames` lists, applied in three passes:
+   - **Asker names** (opener's name and name parts) → `[ASKER]` (or `USER_<HMAC>` in deterministic mode).
+   - **Other names** (all other full names and name parts) → `[NAME]` (or `USER_<HMAC>`).
+   - **Usernames / login IDs** (parenthesized usernames from `created_by` fields, `sys_created_by`) → `[USERNAME]` (or `USER_<HMAC>`).
+   Applying the asker pass first ensures the opener's name is consistently labeled `[ASKER]` even when it appears in staff messages.
 
-For markdown message headings only, when `deterministic_pii = false`, the opener's redacted author label is rendered as `[ASKER]` instead of `[NAME]`. Non-opener redacted author names remain `[NAME]`.
+The `[ASKER]` / `[NAME]` / `[USERNAME]` distinction applies to both message body text and markdown message headings (author names). For message body text, the three-pass Aho-Corasick approach above is used. For markdown headings, author names are redacted with a simpler string comparison: the author is compared (case-insensitively, after stripping any ` (username)` suffix) to the opener, yielding `[ASKER]` or `[NAME]` directly — no dictionary matching needed since author strings are always exactly as stored in `created_by`. In deterministic mode all three produce `USER_<HMAC>` using the same HMAC function, so the same name string always maps to the same alias regardless of which pass caught it.
 
 #### 4.5.3 Deterministic Pseudonymization
 

@@ -60,12 +60,12 @@ pub fn process_ticket(path: &Path, config: &Config) -> Result<TicketResult, Stri
     // Step 4: Deduplicate
     ticket.messages = dedup::deduplicate(ticket.messages);
 
-    // Build name matcher once for all PII operations
-    let name_matcher = pii::build_name_matcher(&ticket.known_pii);
+    // Build PII matchers once for all PII operations
+    let matchers = pii::build_pii_matchers(&ticket);
 
     // Step 5: PII filtering (message-level, skipped for JSON — recursive PII handles it)
     if !matches!(config.output_format, OutputFormat::Json) {
-        pii::filter_pii(&mut ticket, &config.pii_filter, &name_matcher, config.deterministic_pii);
+        pii::filter_pii(&mut ticket, &config.pii_filter, &matchers, config.deterministic_pii);
     }
 
     // Step 6: Post-extraction filters
@@ -85,13 +85,13 @@ pub fn process_ticket(path: &Path, config: &Config) -> Result<TicketResult, Stri
             OutputFormat::Json => true,
             OutputFormat::Markdown => config.deterministic_pii,
         };
-        Some((&name_matcher, deterministic))
+        Some((&matchers, deterministic))
     } else {
         None
     };
 
     // Step 7: Build timeline and export
-    export::export_ticket(config, &mut ticket, path, &name_matcher, pii_for_attachments)?;
+    export::export_ticket(config, &mut ticket, path, &matchers, pii_for_attachments)?;
 
     Ok(TicketResult::Processed)
 }

@@ -54,8 +54,10 @@ pub struct Ticket {
     pub assignment_group: Option<String>,
     pub messages: Vec<Message>,
     pub attachments: Vec<Attachment>,
-    /// Names, usernames, and IDs extracted from ticket data for PII filtering.
-    pub known_pii: Vec<String>,
+    /// Full names and name parts extracted from ticket metadata for PII filtering.
+    pub known_names: Vec<String>,
+    /// Usernames (login IDs) extracted from ticket metadata for PII filtering.
+    pub known_usernames: Vec<String>,
     /// Author of the first customer-facing message (the original asker).
     pub opener: Option<String>,
     /// Original parsed JSON, preserved only when output_format is Json.

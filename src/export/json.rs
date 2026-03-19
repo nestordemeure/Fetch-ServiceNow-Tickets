@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use aho_corasick::AhoCorasick;
 use rayon::prelude::*;
 use serde_json::Value;
 
 use crate::pipeline::attachments;
 use crate::pii;
+use crate::pii::PiiMatchers;
 use crate::types::Ticket;
 
 /// Compute the output path for a ticket's JSON file.
@@ -25,8 +25,8 @@ pub fn export(
     input_dir: &Path,
     output_dir: &Path,
     symlink_attachments: bool,
-    name_matcher: &Option<AhoCorasick>,
-    pii_for_attachments: Option<(&Option<AhoCorasick>, bool)>,
+    matchers: &PiiMatchers,
+    pii_for_attachments: Option<(&PiiMatchers, bool)>,
 ) -> Result<(), String> {
     let raw_json = ticket
         .raw_json
@@ -39,7 +39,7 @@ pub fn export(
     write_back_messages(&mut data, &ticket.messages);
 
     // Step 2: Recursive PII sanitization on the entire JSON tree
-    pii::json::sanitize_value(&mut data, name_matcher);
+    pii::json::sanitize_value(&mut data, matchers);
 
     // Step 3: Copy or symlink attachment files, preserving relative paths
     write_attachments_json(&data, input_dir, output_dir, symlink_attachments, pii_for_attachments)?;
@@ -132,7 +132,7 @@ fn write_attachments_json(
     input_dir: &Path,
     output_dir: &Path,
     symlink_attachments: bool,
-    pii: Option<(&Option<AhoCorasick>, bool)>,
+    pii: Option<(&PiiMatchers, bool)>,
 ) -> Result<(), String> {
     let work: Vec<(PathBuf, PathBuf)> = match data.get("attachments").and_then(|a| a.as_array()) {
         Some(atts) => atts

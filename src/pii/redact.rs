@@ -60,18 +60,20 @@ fn pii_regex_set() -> &'static RegexSet {
 }
 
 /// Fast pre-check: does this text contain any PII-like patterns?
-/// Uses a single RegexSet DFA pass plus an Aho-Corasick check.
+/// Uses a single RegexSet DFA pass plus Aho-Corasick checks across all matchers.
 /// When this returns false, `redact_text` would return the input unchanged.
-pub(crate) fn might_contain_pii(text: &str, name_matcher: &Option<AhoCorasick>) -> bool {
+pub(crate) fn might_contain_pii(text: &str, matchers: &super::PiiMatchers) -> bool {
     pii_regex_set().is_match(text)
-        || name_matcher.as_ref().is_some_and(|ac| ac.is_match(text))
+        || matchers.asker.as_ref().is_some_and(|ac| ac.is_match(text))
+        || matchers.names.as_ref().is_some_and(|ac| ac.is_match(text))
+        || matchers.usernames.as_ref().is_some_and(|ac| ac.is_match(text))
 }
 
 /// Redact PII from a single text string.
 /// Applied in order: passwords, emails, username-in-context patterns, Zoom,
-/// phones, then names.
+/// phones, then names (asker → [ASKER], names → [NAME], usernames → [USERNAME]).
 /// Uses Cow<str> throughout to avoid allocations when regexes don't match.
-pub(crate) fn redact_text(text: &str, name_matcher: &Option<AhoCorasick>, deterministic: bool) -> String {
+pub(crate) fn redact_text(text: &str, matchers: &super::PiiMatchers, deterministic: bool) -> String {
     let text: Cow<str> = redact_passwords(text);
     let text: Cow<str> = redact_emails(&text, deterministic);
     let text: Cow<str> = redact_username_contexts(&text, deterministic);
@@ -81,7 +83,12 @@ pub(crate) fn redact_text(text: &str, name_matcher: &Option<AhoCorasick>, determ
         text
     };
     let text: Cow<str> = redact_phones(&text);
-    match redact_names(&text, name_matcher, deterministic) {
+    // Apply name matchers in priority order: asker first, then other names, then usernames.
+    // In deterministic mode all three produce USER_<HMAC>; in non-deterministic mode each
+    // has a distinct placeholder so the reader can tell names from login IDs.
+    let text: Cow<str> = redact_names_placeholder(&text, &matchers.asker, "[ASKER]", deterministic);
+    let text: Cow<str> = redact_names_placeholder(&text, &matchers.names, "[NAME]", deterministic);
+    match redact_names_placeholder(&text, &matchers.usernames, "[USERNAME]", deterministic) {
         Cow::Borrowed(s) => s.to_string(),
         Cow::Owned(s) => s,
     }
@@ -280,14 +287,14 @@ fn redact_username_contexts<'a>(text: &'a str, deterministic: bool) -> Cow<'a, s
         if deterministic {
             format!("USER_{}", hmac_tag(username))
         } else {
-            "[NAME]".to_string()
+            "[USERNAME]".to_string()
         }
     };
 
     // Each step: only allocate (is_match + replace_all + into_owned) when there's a match.
     // Otherwise pass the Cow through unchanged — zero allocation for the common case.
 
-    // Shell login: user@host → [NAME]@host or USER_HASH@host
+    // Shell login: user@host → [USERNAME]@host or USER_HASH@host
     let text: Cow<'a, str> = if shell_login_regex().is_match(text) {
         Cow::Owned(shell_login_regex()
             .replace_all(text, |caps: &regex::Captures| {
@@ -349,7 +356,14 @@ pub(crate) fn is_word_boundary(text: &str, pos: usize) -> bool {
     !bytes[pos - 1].is_ascii_alphanumeric() || !bytes[pos].is_ascii_alphanumeric()
 }
 
-fn redact_names<'a>(text: &'a str, matcher: &Option<AhoCorasick>, deterministic: bool) -> Cow<'a, str> {
+/// Replace word-boundary-aligned matches with `placeholder` (non-deterministic)
+/// or `USER_<HMAC>` (deterministic). Returns `Borrowed` if nothing matched.
+pub(crate) fn redact_names_placeholder<'a>(
+    text: &'a str,
+    matcher: &Option<AhoCorasick>,
+    placeholder: &str,
+    deterministic: bool,
+) -> Cow<'a, str> {
     let ac = match matcher {
         Some(ac) => ac,
         None => return Cow::Borrowed(text),
@@ -363,7 +377,6 @@ fn redact_names<'a>(text: &'a str, matcher: &Option<AhoCorasick>, deterministic:
         let start = mat.start();
         let end = mat.end();
 
-        // Only replace if the match is at word boundaries on both sides
         if is_word_boundary(text, start) && is_word_boundary(text, end) {
             if !had_match {
                 result = String::with_capacity(text.len());
@@ -374,7 +387,7 @@ fn redact_names<'a>(text: &'a str, matcher: &Option<AhoCorasick>, deterministic:
                 let matched = &text[start..end];
                 result.push_str(&format!("USER_{}", hmac_tag(matched)));
             } else {
-                result.push_str("[NAME]");
+                result.push_str(placeholder);
             }
             last_end = end;
         }
@@ -388,118 +401,68 @@ fn redact_names<'a>(text: &'a str, matcher: &Option<AhoCorasick>, deterministic:
     }
 }
 
-// ── Author-specific redaction ────────────────────────────────────────────────
-// Author strings are always names (possibly with an embedded email address).
-// Skip patterns that never appear in author fields (passwords, phones, Zoom
-// links, username-in-context) and replace the name portion directly with the
-// caller-supplied placeholder — no second-pass `.replace("[NAME]", ...)` needed.
-
-/// Redact PII from a message author string.
-///
-/// Only emails and names are redacted — authors are names, not free-form text.
-/// In non-deterministic mode the name is replaced with `name_placeholder`
-/// (`"[ASKER]"` or `"[NAME]"`). In deterministic mode it is replaced with
-/// `USER_<HMAC>` and the placeholder argument is ignored.
-pub(crate) fn redact_author(
-    text: &str,
-    name_matcher: &Option<AhoCorasick>,
-    name_placeholder: &str,
-    deterministic: bool,
-) -> String {
-    if deterministic {
-        let after_email = email_regex().replace_all(text, |caps: &regex::Captures| {
-            format!("EMAIL_{}", hmac_tag(&caps[0]))
-        });
-        match redact_names(&after_email, name_matcher, true) {
-            Cow::Borrowed(s) => s.to_string(),
-            Cow::Owned(s) => s,
-        }
-    } else {
-        let after_email = email_regex().replace_all(text, "[EMAIL]");
-        redact_name_as(&after_email, name_matcher, name_placeholder)
-    }
-}
-
-/// Replace every word-boundary-aligned name match with `placeholder`.
-/// Non-deterministic only — deterministic callers use `redact_names(..., true)`.
-fn redact_name_as(text: &str, matcher: &Option<AhoCorasick>, placeholder: &str) -> String {
-    let ac = match matcher {
-        Some(ac) => ac,
-        None => return text.to_string(),
-    };
-
-    let mut result = String::with_capacity(text.len());
-    let mut last_end = 0;
-
-    for mat in ac.find_iter(text) {
-        let start = mat.start();
-        let end = mat.end();
-        if is_word_boundary(text, start) && is_word_boundary(text, end) {
-            result.push_str(&text[last_end..start]);
-            result.push_str(placeholder);
-            last_end = end;
-        }
-    }
-    result.push_str(&text[last_end..]);
-    result
-}
 
 #[cfg(test)]
 mod tests {
     use super::redact_text;
     use aho_corasick::AhoCorasick;
+    use crate::pii::PiiMatchers;
+
+    fn no_matchers() -> PiiMatchers {
+        PiiMatchers { asker: None, names: None, usernames: None }
+    }
 
     #[test]
     fn redacts_labeled_contiguous_ten_digit_phone() {
-        let redacted = redact_text("Phone number - 6513410805", &None, false);
+        let redacted = redact_text("Phone number - 6513410805", &no_matchers(), false);
         assert_eq!(redacted, "Phone number - [PHONE]");
     }
 
     #[test]
     fn redacts_international_phone_with_four_digit_area_code() {
-        let redacted = redact_text("+9 (0532) 596 1729", &None, false);
+        let redacted = redact_text("+9 (0532) 596 1729", &no_matchers(), false);
         assert_eq!(redacted, "[PHONE]");
     }
 
     #[test]
     fn redacts_labeled_spaced_phone() {
-        let redacted = redact_text("Work Phone Number: 931 200 4393", &None, false);
+        let redacted = redact_text("Work Phone Number: 931 200 4393", &no_matchers(), false);
         assert_eq!(redacted, "Work Phone Number: [PHONE]");
     }
 
     #[test]
     fn redacts_labeled_phone_with_is() {
-        let redacted = redact_text("my phone number is 6466090124", &None, false);
+        let redacted = redact_text("my phone number is 6466090124", &no_matchers(), false);
         assert_eq!(redacted, "my phone number is [PHONE]");
     }
 
     #[test]
     fn redacts_whatsapp_phone() {
-        let redacted = redact_text("WhatsApp: (+91) 9444511865", &None, false);
+        let redacted = redact_text("WhatsApp: (+91) 9444511865", &no_matchers(), false);
         assert_eq!(redacted, "WhatsApp: [PHONE]");
     }
 
     #[test]
     fn redacts_cel_phone() {
-        let redacted = redact_text("Cel: 6314136020", &None, false);
+        let redacted = redact_text("Cel: 6314136020", &no_matchers(), false);
         assert_eq!(redacted, "Cel: [PHONE]");
     }
 
     #[test]
     fn redacts_phone_with_extension() {
-        let redacted = redact_text("Tel: +886-3-5780281 ext. 6307", &None, false);
+        let redacted = redact_text("Tel: +886-3-5780281 ext. 6307", &no_matchers(), false);
         assert_eq!(redacted, "Tel: [PHONE]");
     }
 
     #[test]
     fn redacts_phone_with_odd_separators() {
-        let redacted = redact_text("Tel: 1-865//591-4805", &None, false);
+        let redacted = redact_text("Tel: 1-865//591-4805", &no_matchers(), false);
         assert_eq!(redacted, "Tel: [PHONE]");
     }
 
     #[test]
     fn redacts_ph_label() {
-        let redacted = redact_text("Ph: 3034971289", &None, false);
+        let redacted = redact_text("Ph: 3034971289", &no_matchers(), false);
         assert_eq!(redacted, "Ph: [PHONE]");
     }
 
@@ -507,7 +470,7 @@ mod tests {
     fn redacts_zoom_meeting_details() {
         let redacted = redact_text(
             "Join Zoom Meeting\nhttps://lbnl.zoom.us/j/7314990879?pwd=abc\nMeeting ID: 731 499 0879\n[PHONE],,7314990879#,,,,*760714# US (Los Angeles)",
-            &None,
+            &no_matchers(),
             false,
         );
         assert_eq!(
@@ -524,7 +487,8 @@ mod tests {
                 .build(["Adrian Hill"])
                 .unwrap(),
         );
-        let redacted = redact_text("Adrian Hill <adrianhill@berkeley.edu>", &matcher, false);
+        let matchers = PiiMatchers { asker: None, names: matcher, usernames: None };
+        let redacted = redact_text("Adrian Hill <adrianhill@berkeley.edu>", &matchers, false);
         assert_eq!(redacted, "[NAME] <[EMAIL]>");
     }
 }

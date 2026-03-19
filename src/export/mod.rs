@@ -3,9 +3,9 @@ pub mod markdown;
 
 use std::path::{Path, PathBuf};
 
-use aho_corasick::AhoCorasick;
 use chrono::NaiveDate;
 
+use crate::pii::PiiMatchers;
 use crate::types::{Config, OutputFormat, Ticket};
 
 /// Compute the primary output file path for a ticket (used for freshness checks).
@@ -35,12 +35,12 @@ pub fn export_ticket(
     config: &Config,
     ticket: &mut Ticket,
     json_input_path: &Path,
-    name_matcher: &Option<AhoCorasick>,
-    pii_for_attachments: Option<(&Option<AhoCorasick>, bool)>,
+    matchers: &PiiMatchers,
+    pii_for_attachments: Option<(&PiiMatchers, bool)>,
 ) -> Result<(), String> {
     match config.output_format {
         OutputFormat::Markdown => {
-            markdown::export(config, ticket, name_matcher, pii_for_attachments)
+            markdown::export(config, ticket, matchers, pii_for_attachments)
         }
         OutputFormat::Json => {
             json::export(
@@ -49,7 +49,7 @@ pub fn export_ticket(
                 &config.input_dir,
                 &config.output_dir,
                 config.symlink_attachments,
-                name_matcher,
+                matchers,
                 pii_for_attachments,
             )
         }

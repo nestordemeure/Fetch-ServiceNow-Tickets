@@ -61,7 +61,7 @@ Guidance:
 - Preserve original text.
 - Keep ordering chronological (oldest first) based on each message timestamp.
 - Skip system messages (created by `System`).
-- When author headings are PII-redacted and `deterministic_pii = false`, render the original ticket opener as `[ASKER]`. Other redacted author names remain `[NAME]`.
+- When author headings are PII-redacted and `deterministic_pii = false`, render the original ticket opener as `[ASKER]`, other redacted full names as `[NAME]`, and redacted login IDs as `[USERNAME]`. The same placeholders are used in message body text.
 
 ### Attachments in the Timeline
 

@@ -82,8 +82,9 @@ pub fn load_ticket_from_value(data: Value, path: &Path, input_root: &Path, outpu
     }
 
     // Extract PII terms from ticket data
-    let mut known_pii = Vec::new();
-    collect_pii_terms(&data, &messages, &mut known_pii);
+    let mut known_names = Vec::new();
+    let mut known_usernames = Vec::new();
+    collect_pii_terms(&data, &messages, &mut known_names, &mut known_usernames);
 
     // Identify opener: first customer-facing (non-internal) message author
     let opener = messages
@@ -105,7 +106,8 @@ pub fn load_ticket_from_value(data: Value, path: &Path, input_root: &Path, outpu
         assignment_group,
         messages,
         attachments,
-        known_pii,
+        known_names,
+        known_usernames,
         opener,
         raw_json,
     })
@@ -244,50 +246,56 @@ fn parse_date(s: &str) -> Result<NaiveDate, String> {
         .map_err(|e| format!("cannot parse date: {}", e))
 }
 
-/// Extract names, usernames, and name parts from ticket data for PII dictionary matching.
+/// Extract names and usernames from ticket data into separate lists for PII dictionary matching.
 ///
 /// Sources:
 ///   - message `created_by` fields (e.g. "First Last (username) (Staff work notes ...)")
 ///   - `incident_fields.caller_id` (e.g. "Last, First (username)")
 ///   - `incident_fields.opened_by` (e.g. "Last, First (username)")
 ///   - `incident_fields.sys_created_by` (plain username)
-fn collect_pii_terms(data: &Value, messages: &[Message], out: &mut Vec<String>) {
-    let mut seen = std::collections::HashSet::new();
+fn collect_pii_terms(data: &Value, messages: &[Message], names: &mut Vec<String>, usernames: &mut Vec<String>) {
+    let mut seen_names = std::collections::HashSet::new();
+    let mut seen_usernames = std::collections::HashSet::new();
 
-    let mut add = |term: &str| {
+    let mut add_name = |term: &str| {
         let t = term.trim().to_string();
-        // Minimum 3 characters to avoid short tokens matching inside common words
-        if t.len() >= 3 && should_index_pii_term(&t) && seen.insert(t.to_lowercase()) {
-            out.push(t);
+        if t.len() >= 3 && should_index_pii_term(&t) && seen_names.insert(t.to_lowercase()) {
+            names.push(t);
+        }
+    };
+    let mut add_username = |term: &str| {
+        let t = term.trim().to_string();
+        if t.len() >= 3 && should_index_pii_term(&t) && seen_usernames.insert(t.to_lowercase()) {
+            usernames.push(t);
         }
     };
 
-    // From message authors (already normalized, but we also want the raw created_by for usernames)
+    // From message authors (full name and individual parts → names)
     for msg in messages {
-        add(&msg.author);
-        // Individual name parts (first, last)
+        add_name(&msg.author);
         for part in msg.author.split_whitespace() {
-            add(part);
+            add_name(part);
         }
     }
 
-    // From incident_fields: caller_id, opened_by, sys_created_by
+    // From incident_fields: caller_id, opened_by, closed_by, resolved_by
     let fields = &data["incident_fields"];
     for key in &["caller_id", "opened_by", "closed_by", "resolved_by"] {
         if let Some(raw) = fields[*key].as_str() {
-            extract_name_and_username(raw, &mut add);
+            extract_name_and_username(raw, &mut add_name, &mut add_username);
         }
     }
+    // sys_created_by is a plain login username
     if let Some(username) = fields["sys_created_by"].as_str() {
-        add(username);
+        add_username(username);
     }
 
-    // From raw created_by in discussions (to capture usernames in parentheses)
+    // From raw created_by in discussions (to capture parenthesized usernames)
     for section in &["customer_facing_comments", "internal_work_notes"] {
         if let Some(msgs) = data["discussions"][*section].as_array() {
             for msg in msgs {
                 if let Some(raw) = msg["created_by"].as_str() {
-                    extract_name_and_username(raw, &mut add);
+                    extract_name_and_username(raw, &mut add_name, &mut add_username);
                 }
             }
         }
@@ -319,8 +327,12 @@ fn looks_like_person_name_component(component: &str) -> bool {
 }
 
 /// Parse a name field like "Last, First (username)" or "First Last (username) (suffix)"
-/// and call `add` for the full name, individual parts, and username.
-fn extract_name_and_username(raw: &str, add: &mut impl FnMut(&str)) {
+/// and call `add_name` for the full name and individual parts, `add_username` for the login ID.
+fn extract_name_and_username(
+    raw: &str,
+    add_name: &mut impl FnMut(&str),
+    add_username: &mut impl FnMut(&str),
+) {
     if raw.is_empty() || raw == "System" {
         return;
     }
@@ -334,29 +346,31 @@ fn extract_name_and_username(raw: &str, add: &mut impl FnMut(&str)) {
                 let first = first.trim();
                 let last = last.trim();
                 if looks_like_person_name_component(first) && looks_like_person_name_component(last) {
-                    add(name_part);
-                    add(&format!("{} {}", first, last));
-                    add(first);
-                    add(last);
+                    add_name(name_part);
+                    add_name(&format!("{} {}", first, last));
+                    add_name(first);
+                    add_name(last);
                 }
             } else {
-                add(name_part);
+                add_name(name_part);
                 for part in name_part.split_whitespace() {
-                    add(part);
+                    add_name(part);
                 }
             }
         }
 
-        // Username in parentheses
+        // Username in parentheses → username bucket
         if let Some(paren_end) = raw[paren_start..].find(')') {
             let username = &raw[paren_start + 1..paren_start + paren_end];
-            add(username);
+            add_username(username);
         }
     } else {
-        // No parentheses - just a name or username
-        add(raw);
+        // No parentheses — treat as a plain name (could be "First Last" or a bare username
+        // from a created_by field that had no parenthesized login). Add to names only;
+        // sys_created_by (plain usernames) is handled separately by the caller.
+        add_name(raw);
         for part in raw.split_whitespace() {
-            add(part);
+            add_name(part);
         }
     }
 }
@@ -367,9 +381,15 @@ mod tests {
 
     #[test]
     fn skips_role_and_org_name_parts() {
-        let mut terms = Vec::new();
-        extract_name_and_username("Operator, NERSC (operator)", &mut |term| terms.push(term.to_string()));
-        assert_eq!(terms, vec!["operator".to_string()]);
+        let mut names = Vec::new();
+        let mut usernames = Vec::new();
+        extract_name_and_username(
+            "Operator, NERSC (operator)",
+            &mut |t| names.push(t.to_string()),
+            &mut |t| usernames.push(t.to_string()),
+        );
+        assert!(names.is_empty());
+        assert_eq!(usernames, vec!["operator".to_string()]);
     }
 
     #[test]

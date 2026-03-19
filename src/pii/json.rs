@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use aho_corasick::AhoCorasick;
 use serde_json::Value;
 
 use super::redact;
+use super::PiiMatchers;
 
 /// How a recognized JSON field should be sanitized.
 #[derive(Clone, Copy)]
@@ -70,7 +70,7 @@ fn field_kinds() -> &'static HashMap<&'static str, FieldKind> {
 /// - Email fields → `EMAIL_<HMAC10>`
 /// - Watch-list fields → comma-separated aliases
 /// - All other strings → free-text scan (emails, shell logins, paths, phones, passwords, names)
-pub fn sanitize_value(value: &mut Value, name_matcher: &Option<AhoCorasick>) {
+pub fn sanitize_value(value: &mut Value, matchers: &PiiMatchers) {
     match value {
         Value::Object(map) => {
             let kinds = field_kinds();
@@ -84,19 +84,19 @@ pub fn sanitize_value(value: &mut Value, name_matcher: &Option<AhoCorasick>) {
                         Some(FieldKind::Email) => sanitize_email_field(val),
                         Some(FieldKind::WatchList) => sanitize_watch_list_field(val),
                         Some(FieldKind::Skip) => {}
-                        None => sanitize_value(val, name_matcher),
+                        None => sanitize_value(val, matchers),
                     }
                 }
             }
         }
         Value::Array(arr) => {
             for item in arr.iter_mut() {
-                sanitize_value(item, name_matcher);
+                sanitize_value(item, matchers);
             }
         }
         Value::String(s) => {
-            if redact::might_contain_pii(s, name_matcher) {
-                *s = redact::redact_text(s, name_matcher, true);
+            if redact::might_contain_pii(s, matchers) {
+                *s = redact::redact_text(s, matchers, true);
             }
         }
         _ => {}

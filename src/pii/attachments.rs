@@ -2,9 +2,8 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::OnceLock;
 
-use aho_corasick::AhoCorasick;
-
 use super::redact;
+use super::PiiMatchers;
 
 /// O(1) lookup for binary extensions instead of linear scan over ~50 entries.
 fn binary_extensions() -> &'static HashSet<&'static str> {
@@ -43,7 +42,7 @@ fn binary_extensions() -> &'static HashSet<&'static str> {
 pub fn try_redact_text_attachment(
     src: &Path,
     dest: &Path,
-    name_matcher: &Option<AhoCorasick>,
+    matchers: &PiiMatchers,
     deterministic: bool,
 ) -> Result<bool, String> {
     // Fast path: skip known binary extensions without reading the file
@@ -66,11 +65,11 @@ pub fn try_redact_text_attachment(
 
     // Fast pre-check: single RegexSet DFA pass + Aho-Corasick scan.
     // Avoids running 5+ individual regex replacements when no PII patterns exist.
-    if !redact::might_contain_pii(text, name_matcher) {
+    if !redact::might_contain_pii(text, matchers) {
         return Ok(false);
     }
 
-    let redacted = redact::redact_text(text, name_matcher, deterministic);
+    let redacted = redact::redact_text(text, matchers, deterministic);
 
     // Pre-check can have false positives (e.g. name match at non-word-boundary),
     // so verify something actually changed.

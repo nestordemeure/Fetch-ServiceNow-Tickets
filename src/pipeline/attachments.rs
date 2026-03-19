@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use aho_corasick::AhoCorasick;
 use rayon::prelude::*;
 
+use crate::pii::PiiMatchers;
 use crate::types::Attachment;
 
 /// Sanitize a filename for filesystem safety.
@@ -65,7 +65,7 @@ pub fn write_attachment(
     dest_path: &Path,
     description: &str,
     symlink_attachments: bool,
-    pii: Option<(&Option<AhoCorasick>, bool)>,
+    pii: Option<(&PiiMatchers, bool)>,
 ) -> Result<(), String> {
     if std::fs::symlink_metadata(dest_path).is_ok() {
         std::fs::remove_file(dest_path).map_err(|e| {
@@ -80,11 +80,11 @@ pub fn write_attachment(
 
     // If PII redaction is enabled, try to redact text attachments first.
     // On success (PII found and redacted), we're done — skip normal copy/symlink.
-    if let Some((name_matcher, deterministic)) = pii
+    if let Some((matchers, deterministic)) = pii
         && crate::pii::attachments::try_redact_text_attachment(
             src,
             dest_path,
-            name_matcher,
+            matchers,
             deterministic,
         )?
     {
@@ -123,7 +123,7 @@ pub fn copy_attachments(
     attachments: &[Attachment],
     dest_dir: &Path,
     symlink_attachments: bool,
-    pii: Option<(&Option<AhoCorasick>, bool)>,
+    pii: Option<(&PiiMatchers, bool)>,
 ) -> Result<(), String> {
     attachments.par_iter().try_for_each(|att| {
         let dest_path = dest_dir.join(&att.resolved_name);

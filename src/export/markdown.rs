@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use aho_corasick::AhoCorasick;
 use chrono::NaiveDate;
 
 use crate::pii::redact;
+use crate::pii::PiiMatchers;
 use crate::pipeline::{attachments, timeline};
 use crate::types::{Config, PiiFilter, Ticket, TimelineEntryKind};
 
@@ -51,8 +51,8 @@ pub fn write_agent_md(output_dir: &Path) -> Result<(), String> {
 pub fn export(
     config: &Config,
     ticket: &mut Ticket,
-    name_matcher: &Option<AhoCorasick>,
-    pii_for_attachments: Option<(&Option<AhoCorasick>, bool)>,
+    matchers: &PiiMatchers,
+    pii_for_attachments: Option<(&PiiMatchers, bool)>,
 ) -> Result<(), String> {
     let ticket_dir = {
         let year = ticket.opened_date.format("%Y").to_string();
@@ -95,7 +95,7 @@ pub fn export(
         md.push_str(" - ");
         md.push_str(&redact_markdown_field(
             desc,
-            name_matcher,
+            matchers,
             !matches!(config.pii_filter, PiiFilter::None),
             config.deterministic_pii,
         ));
@@ -123,7 +123,6 @@ pub fn export(
                 md.push_str(&redact_markdown_author(
                     author,
                     ticket.opener.as_deref(),
-                    name_matcher,
                     !matches!(config.pii_filter, PiiFilter::None),
                     config.deterministic_pii,
                 ));
@@ -165,72 +164,62 @@ pub fn export(
 
 fn redact_markdown_field(
     text: &str,
-    name_matcher: &Option<AhoCorasick>,
+    matchers: &PiiMatchers,
     pii_enabled: bool,
     deterministic: bool,
 ) -> String {
-    if !pii_enabled || !redact::might_contain_pii(text, name_matcher) {
+    if !pii_enabled || !redact::might_contain_pii(text, matchers) {
         return text.to_string();
     }
-    redact::redact_text(text, name_matcher, deterministic)
+    redact::redact_text(text, matchers, deterministic)
 }
 
 fn redact_markdown_author(
     author: &str,
     opener: Option<&str>,
-    name_matcher: &Option<AhoCorasick>,
     pii_enabled: bool,
     deterministic: bool,
 ) -> String {
     if !pii_enabled {
         return author.to_string();
     }
-    // Authors are always names (possibly with an embedded email). Use the
-    // targeted author redactor: only emails and names are checked, and the
-    // [ASKER]/[NAME] placeholder is substituted directly in one AC pass.
-    let name_placeholder = if opener.is_some_and(|o| o == author) {
-        "[ASKER]"
-    } else {
-        "[NAME]"
-    };
-    redact::redact_author(author, name_matcher, name_placeholder, deterministic)
+    // Strip " (username)" suffix from both sides — the author string from
+    // created_by is "Name (username)" but we only want to display the name.
+    let name = strip_username_suffix(author);
+    if deterministic {
+        return format!("USER_{}", redact::hmac_tag(name));
+    }
+    let is_asker = opener.is_some_and(|o| strip_username_suffix(o).eq_ignore_ascii_case(name));
+    if is_asker { "[ASKER]" } else { "[NAME]" }.to_string()
+}
+
+/// Strip the " (username)" or " (username) (suffix)" parenthetical from a name field.
+fn strip_username_suffix(s: &str) -> &str {
+    s.find(" (").map_or(s, |i| &s[..i])
 }
 
 #[cfg(test)]
 mod tests {
     use super::{redact_markdown_author, redact_markdown_field};
-    use aho_corasick::AhoCorasick;
+    use crate::pii::PiiMatchers;
 
     #[test]
-    fn redacts_author_email_in_markdown_heading() {
-        let matcher = Some(
-            AhoCorasick::builder()
-                .ascii_case_insensitive(true)
-                .build(["Adrian Hill"])
-                .unwrap(),
-        );
+    fn redacts_opener_author_as_asker_in_heading() {
+        // Author matches opener (with username suffix stripped) → [ASKER]
         let redacted = redact_markdown_author(
-            "Adrian Hill (adrianhill@berkeley.edu)",
-            Some("Adrian Hill (adrianhill@berkeley.edu)"),
-            &matcher,
+            "Mahesh Natarajan (nataraj2)",
+            Some("Mahesh Natarajan (nataraj2)"),
             true,
             false,
         );
-        assert_eq!(redacted, "[ASKER] ([EMAIL])");
+        assert_eq!(redacted, "[ASKER]");
     }
 
     #[test]
-    fn redacts_non_opener_author_name_in_markdown_heading() {
-        let matcher = Some(
-            AhoCorasick::builder()
-                .ascii_case_insensitive(true)
-                .build(["Adrian Hill"])
-                .unwrap(),
-        );
+    fn redacts_non_opener_author_as_name_in_heading() {
         let redacted = redact_markdown_author(
-            "Adrian Hill",
-            Some("Someone Else"),
-            &matcher,
+            "Rebecca Hartman-Baker (rjhb)",
+            Some("Mahesh Natarajan (nataraj2)"),
             true,
             false,
         );
@@ -238,28 +227,18 @@ mod tests {
     }
 
     #[test]
-    fn keeps_deterministic_author_aliases_in_markdown_heading() {
-        let matcher = Some(
-            AhoCorasick::builder()
-                .ascii_case_insensitive(true)
-                .build(["Adrian Hill"])
-                .unwrap(),
-        );
-        let redacted = redact_markdown_author(
-            "Adrian Hill",
-            Some("Adrian Hill"),
-            &matcher,
-            true,
-            true,
-        );
+    fn keeps_deterministic_author_alias_in_heading() {
+        // Deterministic: USER_<HMAC of stripped name>
+        let redacted = redact_markdown_author("Adrian Hill (ahill)", Some("Adrian Hill (ahill)"), true, true);
         assert_eq!(redacted, "USER_1AB03F1C8B");
     }
 
     #[test]
     fn redacts_ticket_title_metadata() {
+        let matchers = PiiMatchers { asker: None, names: None, usernames: None };
         let redacted = redact_markdown_field(
             "Reactivate account yezhenyu@nersc.gov",
-            &None,
+            &matchers,
             true,
             false,
         );

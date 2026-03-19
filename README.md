@@ -48,7 +48,7 @@ JSON files are discovered recursively via `walkdir` (using `d_type` to skip `sta
 
 5. **Deduplicate**: remove consecutive messages with identical text and same visibility.
 
-6. **PII redaction** (configurable: `all` / `asker` / `none`): redact names (Aho-Corasick), emails, phones, passwords, Zoom meeting details, shell logins, NERSC paths, and command user flags. Optional deterministic HMAC pseudonyms (`USER_<HMAC>`, `EMAIL_<HMAC>`).
+6. **PII redaction** (configurable: `all` / `asker` / `none`): redact names, usernames, emails, phones, passwords, Zoom meeting details, shell logins, NERSC paths, and command user flags. The ticket opener's name → `[ASKER]`, other names → `[NAME]`, login IDs → `[USERNAME]`. Optional deterministic HMAC pseudonyms (`USER_<HMAC>`, `EMAIL_<HMAC>`) replace all of these consistently.
 
 7. **Build timeline**: merge messages and attachments chronologically. Consecutive attachments are grouped.
 
@@ -59,6 +59,13 @@ JSON files are discovered recursively via `walkdir` (using `d_type` to skip `sta
 See [docs/SPECIFICATIONS.md](docs/SPECIFICATIONS.md) for the full pipeline specification and [docs/ticket_format_specification.md](docs/ticket_format_specification.md) for the markdown output format.
 
 ## TODO
+
+- update claude.md
+  - include readme and docs/specs
+  - require clippy runs and fixes after major code changes
+  - introduce agent.md, the claude file just loading it
+
+- in generated agent.md, have path be absolute
 
 - Import tickets directly from the ServiceNow API
   - Add scron script to refresh tickets regularly
